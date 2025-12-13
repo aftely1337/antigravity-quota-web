@@ -1,0 +1,20 @@
+{
+  "name": "antigravity-quota-web",
+  "version": "1.0.0",
+  "description": "Antigravity 余额查询 Web 面板",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [
+    "antigravity",
+    "quota",
+    "monitor"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

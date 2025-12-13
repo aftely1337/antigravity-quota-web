@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Antigravity Quota Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🚀 Antigravity Quota Monitor</h1>
+      <div class="header-actions">
+        <button id="refreshBtn" class="btn btn-primary" onclick="refreshAll()">
+          🔄 刷新全部
+        </button>
+        <button id="uploadBtn" class="btn btn-secondary" onclick="showUploadModal()">
+          📤 上传Auth文件
+        </button>
+      </div>
+    </header>
+
+    <div class="status-bar">
+      <span id="lastUpdate">最后更新: 未知</span>
+      <span id="autoRefresh">
+        <label>
+          <input type="checkbox" id="autoRefreshCheck" onchange="toggleAutoRefresh()">
+          自动刷新 (60秒)
+        </label>
+      </span>
+    </div>
+
+    <div id="accounts" class="accounts-container">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>加载中...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 上传模态框 -->
+  <div id="uploadModal" class="modal">
+    <div class="modal-content">
+      <span class="close" onclick="hideUploadModal()">&times;</span>
+      <h2>上传 Auth 文件</h2>
+      <p>请粘贴 auth JSON 内容或选择文件：</p>
+      <textarea id="authContent" placeholder='{"access_token":"...","refresh_token":"...","email":"..."}'></textarea>
+      <div class="modal-actions">
+        <input type="file" id="fileInput" accept=".json" onchange="handleFileSelect(event)">
+        <button class="btn btn-primary" onclick="uploadAuth()">上传</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 详情模态框 -->
+  <div id="detailModal" class="modal">
+    <div class="modal-content modal-large">
+      <span class="close" onclick="hideDetailModal()">&times;</span>
+      <h2 id="detailTitle">账号详情</h2>
+      <div id="detailContent"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
