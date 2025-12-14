@@ -1,17 +1,134 @@
 /**
  * Antigravity 认证和Token刷新模块
+ * 支持HTTP代理
  */
 
 const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const url = require('url');
 
 // Antigravity OAuth配置 (从CLIProxyAPI提取)
 const ANTIGRAVITY_CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
 const ANTIGRAVITY_CLIENT_SECRET = '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';
 const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+// 代理配置 - 从环境变量读取
+const PROXY_URL = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
+
+/**
+ * 创建代理Agent
+ */
+function createProxyAgent(targetUrl) {
+  if (!PROXY_URL) {
+    return null;
+  }
+  
+  try {
+    const proxyUrl = new URL(PROXY_URL);
+    const targetUrlObj = new URL(targetUrl);
+    
+    // 使用HTTP CONNECT隧道
+    return {
+      host: proxyUrl.hostname,
+      port: proxyUrl.port || 7890,
+      path: `${targetUrlObj.hostname}:443`,
+      headers: {
+        Host: targetUrlObj.hostname
+      }
+    };
+  } catch (e) {
+    console.error('Invalid proxy URL:', e.message);
+    return null;
+  }
+}
+
+/**
+ * 发起HTTPS请求（支持代理）
+ */
+function httpsRequestWithProxy(targetUrl, options, postData) {
+  return new Promise((resolve, reject) => {
+    const targetUrlObj = new URL(targetUrl);
+    
+    if (PROXY_URL) {
+      // 通过代理发送请求
+      const proxyUrl = new URL(PROXY_URL);
+      console.log(`Using proxy: ${proxyUrl.hostname}:${proxyUrl.port}`);
+      
+      // 先建立CONNECT隧道
+      const connectOptions = {
+        hostname: proxyUrl.hostname,
+        port: proxyUrl.port || 7890,
+        method: 'CONNECT',
+        path: `${targetUrlObj.hostname}:443`,
+        headers: {
+          Host: `${targetUrlObj.hostname}:443`
+        }
+      };
+      
+      const connectReq = http.request(connectOptions);
+      
+      connectReq.on('connect', (res, socket) => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`Proxy CONNECT failed: ${res.statusCode}`));
+          return;
+        }
+        
+        // 通过隧道发送HTTPS请求
+        const httpsOptions = {
+          ...options,
+          hostname: targetUrlObj.hostname,
+          path: targetUrlObj.pathname + targetUrlObj.search,
+          socket: socket,
+          agent: false
+        };
+        
+        const req = https.request(httpsOptions, (res) => {
+          let data = '';
+          res.on('data', (chunk) => { data += chunk; });
+          res.on('end', () => {
+            resolve({ statusCode: res.statusCode, data });
+          });
+        });
+        
+        req.on('error', reject);
+        if (postData) {
+          req.write(postData);
+        }
+        req.end();
+      });
+      
+      connectReq.on('error', reject);
+      connectReq.end();
+    } else {
+      // 直接发送请求
+      const reqOptions = {
+        ...options,
+        hostname: targetUrlObj.hostname,
+        path: targetUrlObj.pathname + targetUrlObj.search
+      };
+      
+      const req = https.request(reqOptions, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          resolve({ statusCode: res.statusCode, data });
+        });
+      });
+      
+      req.on('error', reject);
+      req.setTimeout(15000, () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+      
+      if (postData) {
+        req.write(postData);
+      }
+      req.end();
+    }
+  });
+}
 
 /**
  * 读取auth JSON文件
@@ -57,64 +174,46 @@ function isTokenExpired(authData) {
  * @returns {Promise<Object>} 更新后的auth数据
  */
 async function refreshToken(authData) {
-  return new Promise((resolve, reject) => {
-    const postData = new URLSearchParams({
-      client_id: ANTIGRAVITY_CLIENT_ID,
-      client_secret: ANTIGRAVITY_CLIENT_SECRET,
-      grant_type: 'refresh_token',
-      refresh_token: authData.refresh_token
-    }).toString();
+  const postData = new URLSearchParams({
+    client_id: ANTIGRAVITY_CLIENT_ID,
+    client_secret: ANTIGRAVITY_CLIENT_SECRET,
+    grant_type: 'refresh_token',
+    refresh_token: authData.refresh_token
+  }).toString();
 
-    const url = new URL(OAUTH_TOKEN_URL);
-    const options = {
-      hostname: url.hostname,
-      path: url.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(postData),
-        'User-Agent': 'antigravity/1.11.5 windows/amd64'
-      }
-    };
+  const options = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(postData),
+      'User-Agent': 'antigravity/1.11.5 windows/amd64'
+    }
+  };
 
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`Token refresh failed: ${res.statusCode} - ${data}`));
-          return;
-        }
-        
-        try {
-          const tokenResp = JSON.parse(data);
-          const now = Date.now();
-          
-          // 更新auth数据
-          const updatedAuth = {
-            ...authData,
-            access_token: tokenResp.access_token,
-            expires_in: tokenResp.expires_in,
-            timestamp: now,
-            expired: new Date(now + tokenResp.expires_in * 1000).toISOString()
-          };
-          
-          // 如果返回了新的refresh_token，也更新它
-          if (tokenResp.refresh_token) {
-            updatedAuth.refresh_token = tokenResp.refresh_token;
-          }
-          
-          resolve(updatedAuth);
-        } catch (error) {
-          reject(new Error(`Failed to parse token response: ${error.message}`));
-        }
-      });
-    });
-
-    req.on('error', (error) => reject(error));
-    req.write(postData);
-    req.end();
-  });
+  const response = await httpsRequestWithProxy(OAUTH_TOKEN_URL, options, postData);
+  
+  if (response.statusCode !== 200) {
+    throw new Error(`Token refresh failed: ${response.statusCode} - ${response.data}`);
+  }
+  
+  const tokenResp = JSON.parse(response.data);
+  const now = Date.now();
+  
+  // 更新auth数据
+  const updatedAuth = {
+    ...authData,
+    access_token: tokenResp.access_token,
+    expires_in: tokenResp.expires_in,
+    timestamp: now,
+    expired: new Date(now + tokenResp.expires_in * 1000).toISOString()
+  };
+  
+  // 如果返回了新的refresh_token，也更新它
+  if (tokenResp.refresh_token) {
+    updatedAuth.refresh_token = tokenResp.refresh_token;
+  }
+  
+  return updatedAuth;
 }
 
 /**
@@ -178,6 +277,8 @@ module.exports = {
   refreshToken,
   ensureValidToken,
   scanAuthFiles,
+  httpsRequestWithProxy,
   ANTIGRAVITY_CLIENT_ID,
-  ANTIGRAVITY_CLIENT_SECRET
+  ANTIGRAVITY_CLIENT_SECRET,
+  PROXY_URL
 };

@@ -1,8 +1,9 @@
 /**
  * Antigravity 配额查询模块
+ * 支持HTTP代理
  */
 
-const https = require('https');
+const { httpsRequestWithProxy, PROXY_URL } = require('./auth');
 
 // Antigravity API配置
 const ANTIGRAVITY_BASE_URLS = [
@@ -15,53 +16,6 @@ const MODELS_PATH = '/v1internal:fetchAvailableModels';
 const USER_AGENT = 'antigravity/1.11.5 windows/amd64';
 
 /**
- * 发送HTTPS请求
- * @param {string} url - 完整URL
- * @param {Object} options - 请求选项
- * @param {string} body - 请求体
- * @returns {Promise<Object>} 响应数据
- */
-function httpsRequest(url, options, body) {
-  return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-    const reqOptions = {
-      hostname: urlObj.hostname,
-      path: urlObj.pathname + urlObj.search,
-      method: options.method || 'POST',
-      headers: options.headers || {},
-      timeout: 15000
-    };
-
-    const req = https.request(reqOptions, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          try {
-            resolve({ status: res.statusCode, data: JSON.parse(data) });
-          } catch (error) {
-            resolve({ status: res.statusCode, data: data });
-          }
-        } else {
-          reject(new Error(`HTTP ${res.statusCode}: ${data}`));
-        }
-      });
-    });
-
-    req.on('error', (error) => reject(error));
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Request timeout'));
-    });
-
-    if (body) {
-      req.write(body);
-    }
-    req.end();
-  });
-}
-
-/**
  * 获取可用模型列表和配额信息
  * @param {string} accessToken - access token
  * @returns {Promise<Object>} 模型和配额信息
@@ -72,7 +26,12 @@ async function fetchModelsAndQuota(accessToken) {
   for (const baseUrl of ANTIGRAVITY_BASE_URLS) {
     try {
       const url = baseUrl + MODELS_PATH;
-      const response = await httpsRequest(url, {
+      console.log(`Fetching models from: ${url}`);
+      if (PROXY_URL) {
+        console.log(`Using proxy: ${PROXY_URL}`);
+      }
+      
+      const response = await httpsRequestWithProxy(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -81,7 +40,13 @@ async function fetchModelsAndQuota(accessToken) {
         }
       }, '{}');
       
-      return parseModelsResponse(response.data);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        const data = JSON.parse(response.data);
+        console.log('Raw API response keys:', Object.keys(data));
+        return parseModelsResponse(data);
+      } else {
+        throw new Error(`HTTP ${response.statusCode}: ${response.data}`);
+      }
     } catch (error) {
       console.log(`Failed to fetch from ${baseUrl}: ${error.message}`);
       lastError = error;
@@ -99,38 +64,121 @@ async function fetchModelsAndQuota(accessToken) {
 function parseModelsResponse(data) {
   const models = [];
   
-  // 解析模型列表
-  if (data && typeof data === 'object') {
-    for (const [modelId, modelInfo] of Object.entries(data)) {
+  // 解析models数组（如果存在）
+  if (data.models && typeof data.models === 'object') {
+    for (const [modelId, modelInfo] of Object.entries(data.models)) {
       if (modelId && modelInfo) {
-        const model = {
-          modelId: modelId,
-          name: modelId,
-          quotaInfo: null
-        };
-        
-        // 如果有配额信息
-        if (modelInfo.quotaInfo) {
-          model.quotaInfo = {
-            remainingFraction: modelInfo.quotaInfo.remainingFraction,
-            remainingPercentage: modelInfo.quotaInfo.remainingFraction !== undefined 
-              ? modelInfo.quotaInfo.remainingFraction * 100 
-              : undefined,
-            resetTime: modelInfo.quotaInfo.resetTime,
-            isExhausted: modelInfo.quotaInfo.remainingFraction === 0 || 
-                         modelInfo.quotaInfo.remainingFraction === undefined
-          };
+        const model = parseModelEntry(modelId, modelInfo);
+        if (model) {
+          models.push(model);
         }
-        
-        models.push(model);
+      }
+    }
+  }
+  
+  // 解析agentModelSorts（包含常用模型）
+  if (data.agentModelSorts && Array.isArray(data.agentModelSorts)) {
+    // 这些是模型ID引用，我们可以从中提取模型名称
+    for (const modelId of data.agentModelSorts) {
+      if (typeof modelId === 'string' && !models.find(m => m.modelId === modelId)) {
+        models.push({
+          modelId: modelId,
+          name: formatModelName(modelId),
+          category: 'agent',
+          quotaInfo: null
+        });
+      }
+    }
+  }
+  
+  // 解析commandModelIds
+  if (data.commandModelIds && Array.isArray(data.commandModelIds)) {
+    for (const modelId of data.commandModelIds) {
+      if (typeof modelId === 'string' && !models.find(m => m.modelId === modelId)) {
+        models.push({
+          modelId: modelId,
+          name: formatModelName(modelId),
+          category: 'command',
+          quotaInfo: null
+        });
+      }
+    }
+  }
+  
+  // 解析tabModelIds
+  if (data.tabModelIds && Array.isArray(data.tabModelIds)) {
+    for (const modelId of data.tabModelIds) {
+      if (typeof modelId === 'string' && !models.find(m => m.modelId === modelId)) {
+        models.push({
+          modelId: modelId,
+          name: formatModelName(modelId),
+          category: 'tab',
+          quotaInfo: null
+        });
       }
     }
   }
   
   return {
     timestamp: new Date().toISOString(),
-    models: models
+    models: models,
+    raw: {
+      defaultAgentModelId: data.defaultAgentModelId,
+      modelCount: models.length
+    }
   };
+}
+
+/**
+ * 解析单个模型条目
+ */
+function parseModelEntry(modelId, modelInfo) {
+  if (!modelInfo || typeof modelInfo !== 'object') {
+    return null;
+  }
+  
+  const model = {
+    modelId: modelId,
+    name: modelInfo.displayName || formatModelName(modelId),
+    displayName: modelInfo.displayName,
+    category: modelInfo.category || 'unknown',
+    quotaInfo: null
+  };
+  
+  // 如果有配额信息
+  if (modelInfo.quotaInfo) {
+    model.quotaInfo = {
+      remainingFraction: modelInfo.quotaInfo.remainingFraction,
+      remainingPercentage: modelInfo.quotaInfo.remainingFraction !== undefined 
+        ? modelInfo.quotaInfo.remainingFraction * 100 
+        : undefined,
+      resetTime: modelInfo.quotaInfo.resetTime,
+      isExhausted: modelInfo.quotaInfo.remainingFraction === 0 || 
+                   modelInfo.quotaInfo.remainingFraction === undefined
+    };
+  }
+  
+  return model;
+}
+
+/**
+ * 格式化模型名称
+ */
+function formatModelName(modelId) {
+  if (!modelId) return 'Unknown';
+  
+  // 移除前缀并格式化
+  let name = modelId
+    .replace('models/', '')
+    .replace(/-/g, ' ')
+    .replace(/_/g, ' ');
+  
+  // 首字母大写
+  name = name.split(' ').map(word => 
+    word.charAt(0).toUpperCase() + word.slice(1)
+  ).join(' ');
+  
+  return name;
 }
 
 /**
@@ -157,7 +205,7 @@ async function fetchQuotaViaGenerate(accessToken) {
   for (const baseUrl of ANTIGRAVITY_BASE_URLS) {
     try {
       const url = baseUrl + generatePath;
-      const response = await httpsRequest(url, {
+      const response = await httpsRequestWithProxy(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -166,15 +214,17 @@ async function fetchQuotaViaGenerate(accessToken) {
         }
       }, requestBody);
       
-      // 从响应中提取使用信息
-      if (response.data && response.data.usageMetadata) {
-        return {
-          timestamp: new Date().toISOString(),
-          usageMetadata: response.data.usageMetadata
-        };
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        const data = JSON.parse(response.data);
+        // 从响应中提取使用信息
+        if (data && data.usageMetadata) {
+          return {
+            timestamp: new Date().toISOString(),
+            usageMetadata: data.usageMetadata
+          };
+        }
+        return { timestamp: new Date().toISOString(), raw: data };
       }
-      
-      return { timestamp: new Date().toISOString(), raw: response.data };
     } catch (error) {
       console.log(`Generate request failed on ${baseUrl}: ${error.message}`);
     }
