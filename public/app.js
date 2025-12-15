@@ -9,19 +9,41 @@ let quotaData = {};
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   loadQuotaData();
+  restoreAutoRefreshState();
 });
+
+/**
+ * Restore auto refresh state from localStorage
+ */
+function restoreAutoRefreshState() {
+  const saved = localStorage.getItem('autoRefreshEnabled');
+  if (saved === 'true') {
+    const checkbox = document.getElementById('autoRefreshCheck');
+    if (checkbox) {
+      checkbox.checked = true;
+      // Start the auto refresh interval
+      autoRefreshInterval = setInterval(() => {
+        loadQuotaData();
+      }, 60000); // 60 seconds
+    }
+  }
+}
 
 /**
  * Load quota data for all accounts
  */
 async function loadQuotaData() {
   const container = document.getElementById('accounts');
-  container.innerHTML = `
-    <div class="loading">
-      <div class="spinner"></div>
-      <p>正在加载配额信息...</p>
-    </div>
-  `;
+  
+  // Only show full loading state if container is empty
+  if (!container.children.length || container.querySelector('.loading-state')) {
+    container.innerHTML = `
+      <div class="loading-state">
+        <div class="spinner"></div>
+        <p>Fetching latest quota data...</p>
+      </div>
+    `;
+  }
 
   try {
     const response = await fetch('/api/quota');
@@ -37,11 +59,21 @@ async function loadQuotaData() {
   } catch (error) {
     container.innerHTML = `
       <div class="empty-state">
-        <h3>😕 加载失败</h3>
+        <h3>Connection Error</h3>
         <p>${error.message}</p>
-        <button class="btn btn-primary" onclick="loadQuotaData()">重试</button>
+        <button class="btn btn-primary" onclick="loadQuotaData()">Try Again</button>
       </div>
     `;
+  } finally {
+    const refreshBtn = document.getElementById('refreshBtn');
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+        </svg>
+      `;
+    }
   }
 }
 
@@ -54,9 +86,9 @@ function renderAccounts(results) {
   if (!results || results.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
-        <h3>📭 暂无账号</h3>
-        <p>请将 auth JSON 文件添加到 config 目录，或点击上传按钮添加</p>
-        <button class="btn btn-secondary" onclick="showUploadModal()">📤 上传Auth文件</button>
+        <h3>No Accounts Found</h3>
+        <p>Add an auth JSON file to the config directory or upload one to get started.</p>
+        <button class="btn btn-primary" onclick="showUploadModal()">Import Auth File</button>
       </div>
     `;
     return;
@@ -67,36 +99,52 @@ function renderAccounts(results) {
       return `
         <div class="account-card error-card">
           <div class="account-header">
-            <span class="account-email">📧 ${escapeHtml(account.email)}</span>
-            <div class="account-actions">
-              <button class="btn btn-secondary" onclick="refreshAccount('${escapeHtml(account.email)}')">🔄 重试</button>
+            <div class="account-info">
+              <div class="avatar" style="background: var(--error-color)">!</div>
+              <span class="account-email">${escapeHtml(account.email)}</span>
+            </div>
+            <div class="account-controls">
+              <button class="icon-btn" onclick="refreshAccount('${escapeHtml(account.email)}')" title="Retry">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+              </button>
             </div>
           </div>
           <div class="error-message">
-            ❌ 获取配额失败: ${escapeHtml(account.error)}
+            Failed to fetch quota: ${escapeHtml(account.error)}
           </div>
         </div>
       `;
     }
 
     const models = account.quota?.models || [];
+    const initials = account.email.substring(0, 2).toUpperCase();
     
     return `
       <div class="account-card">
         <div class="account-header">
-          <span class="account-email">📧 ${escapeHtml(account.email)}</span>
-          <div class="account-actions">
-            <button class="btn btn-secondary" onclick="refreshAccount('${escapeHtml(account.email)}')">🔄 刷新</button>
-            <button class="btn btn-secondary" onclick="showAccountDetail(${index})">📊 详情</button>
+          <div class="account-info">
+            <div class="avatar">${initials}</div>
+            <span class="account-email">${escapeHtml(account.email)}</span>
+          </div>
+          <div class="account-controls">
+            <button class="icon-btn" onclick="refreshAccount('${escapeHtml(account.email)}')" title="Refresh">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+            </button>
+            <button class="icon-btn" onclick="showAccountDetail(${index})" title="Details">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              </svg>
+            </button>
           </div>
         </div>
-        <div class="models-grid">
+        <div class="account-models">
           ${models.length > 0 ? models.map(model => renderModelCard(model)).join('') : `
-            <div class="model-card">
-              <div class="model-header">
-                <span class="model-name">暂无模型配额信息</span>
-              </div>
-              <p style="color: #888; font-size: 0.85rem;">模型列表已获取，但未返回配额详情</p>
+            <div class="empty-state" style="padding: 20px;">
+              <p>No model quota information available.</p>
             </div>
           `}
         </div>
@@ -113,17 +161,17 @@ function renderModelCard(model) {
   
   if (!quota) {
     return `
-      <div class="model-card">
+      <div class="model-item">
         <div class="model-header">
           <span class="model-name">${escapeHtml(model.name || model.modelId)}</span>
-          <span class="model-status">⚪</span>
+          <span class="model-badge badge-exhausted">Unknown</span>
         </div>
-        <div class="progress-bar">
-          <div class="progress-fill exhausted" style="width: 100%"></div>
+        <div class="progress-track">
+          <div class="progress-bar progress-exhausted" style="width: 100%"></div>
         </div>
-        <div class="model-info">
-          <span class="percentage exhausted">配额未知</span>
-          <span class="reset-time">-</span>
+        <div class="model-meta">
+          <span>Quota: Unknown</span>
+          <span>Reset: -</span>
         </div>
       </div>
     `;
@@ -134,17 +182,17 @@ function renderModelCard(model) {
   const resetTimeFormatted = formatTimeUntilReset(quota.resetTime);
 
   return `
-    <div class="model-card">
+    <div class="model-item">
       <div class="model-header">
         <span class="model-name">${escapeHtml(model.name || model.modelId)}</span>
-        <span class="model-status">${status.emoji}</span>
+        <span class="model-badge badge-${status.class}">${status.text}</span>
       </div>
-      <div class="progress-bar">
-        <div class="progress-fill ${status.class}" style="width: ${Math.max(0, Math.min(100, percentage))}%"></div>
+      <div class="progress-track">
+        <div class="progress-bar progress-${status.class}" style="width: ${Math.max(0, Math.min(100, percentage))}%"></div>
       </div>
-      <div class="model-info">
-        <span class="percentage ${status.class}">${percentage.toFixed(1)}%</span>
-        <span class="reset-time">⏰ ${resetTimeFormatted}</span>
+      <div class="model-meta">
+        <span>${percentage.toFixed(1)}% Remaining</span>
+        <span>Reset: ${resetTimeFormatted}</span>
       </div>
     </div>
   `;
@@ -155,31 +203,31 @@ function renderModelCard(model) {
  */
 function getStatus(percentage) {
   if (percentage === undefined || percentage === null) {
-    return { emoji: '⚪', class: 'exhausted', text: 'unknown' };
+    return { class: 'exhausted', text: 'Unknown' };
   }
   if (percentage <= 0) {
-    return { emoji: '⚫', class: 'exhausted', text: 'exhausted' };
+    return { class: 'exhausted', text: 'Exhausted' };
   }
   if (percentage < 30) {
-    return { emoji: '🔴', class: 'critical', text: 'critical' };
+    return { class: 'critical', text: 'Critical' };
   }
   if (percentage < 50) {
-    return { emoji: '🟡', class: 'warning', text: 'warning' };
+    return { class: 'warning', text: 'Warning' };
   }
-  return { emoji: '🟢', class: 'healthy', text: 'healthy' };
+  return { class: 'healthy', text: 'Healthy' };
 }
 
 /**
  * Format time until reset
  */
 function formatTimeUntilReset(resetTime) {
-  if (!resetTime) return '未知';
+  if (!resetTime) return 'Unknown';
 
   const reset = new Date(resetTime);
   const now = Date.now();
   const ms = reset.getTime() - now;
 
-  if (ms <= 0) return '已过期';
+  if (ms <= 0) return 'Expired';
 
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -187,13 +235,13 @@ function formatTimeUntilReset(resetTime) {
   const days = Math.floor(hours / 24);
 
   if (days > 0) {
-    return `${days}天${hours % 24}小时`;
+    return `${days}d ${hours % 24}h`;
   } else if (hours > 0) {
-    return `${hours}小时${minutes % 60}分钟`;
+    return `${hours}h ${minutes % 60}m`;
   } else if (minutes > 0) {
-    return `${minutes}分${seconds % 60}秒`;
+    return `${minutes}m ${seconds % 60}s`;
   }
-  return `${seconds}秒`;
+  return `${seconds}s`;
 }
 
 /**
@@ -202,12 +250,14 @@ function formatTimeUntilReset(resetTime) {
 async function refreshAll() {
   const btn = document.getElementById('refreshBtn');
   btn.disabled = true;
-  btn.textContent = '⏳ 刷新中...';
+  // Add spin animation class to the svg inside
+  const svg = btn.querySelector('svg');
+  if (svg) svg.classList.add('animate-spin'); // We need to add this class in CSS if not present, but for now just visual cue
+  
+  // Custom spinner for the button
+  btn.innerHTML = `<div class="spinner" style="width: 20px; height: 20px; border-width: 2px;"></div>`;
 
   await loadQuotaData();
-
-  btn.disabled = false;
-  btn.textContent = '🔄 刷新全部';
 }
 
 /**
@@ -215,18 +265,18 @@ async function refreshAll() {
  */
 async function refreshAccount(email) {
   try {
-    showToast('正在刷新...', 'info');
+    showToast(`Refreshing ${email}...`, 'info');
     const response = await fetch(`/api/quota/${encodeURIComponent(email)}`);
     const data = await response.json();
 
     if (data.success) {
-      showToast(`${email} 刷新成功`, 'success');
+      showToast('Account refreshed successfully', 'success');
       await loadQuotaData();
     } else {
-      showToast(`刷新失败: ${data.error}`, 'error');
+      showToast(`Refresh failed: ${data.error}`, 'error');
     }
   } catch (error) {
-    showToast(`刷新失败: ${error.message}`, 'error');
+    showToast(`Refresh failed: ${error.message}`, 'error');
   }
 }
 
@@ -240,13 +290,15 @@ function toggleAutoRefresh() {
     autoRefreshInterval = setInterval(() => {
       loadQuotaData();
     }, 60000); // 60 seconds
-    showToast('已开启自动刷新 (每60秒)', 'success');
+    localStorage.setItem('autoRefreshEnabled', 'true');
+    showToast('Auto refresh enabled (60s)', 'success');
   } else {
     if (autoRefreshInterval) {
       clearInterval(autoRefreshInterval);
       autoRefreshInterval = null;
     }
-    showToast('已关闭自动刷新', 'info');
+    localStorage.setItem('autoRefreshEnabled', 'false');
+    showToast('Auto refresh disabled', 'info');
   }
 }
 
@@ -256,7 +308,7 @@ function toggleAutoRefresh() {
 function updateLastRefreshTime() {
   const element = document.getElementById('lastUpdate');
   const now = new Date();
-  element.textContent = `最后更新: ${now.toLocaleTimeString()}`;
+  element.textContent = `Updated: ${now.toLocaleTimeString()}`;
 }
 
 /**
@@ -295,7 +347,7 @@ async function uploadAuth() {
   const content = document.getElementById('authContent').value.trim();
   
   if (!content) {
-    showToast('请输入 Auth 内容', 'error');
+    showToast('Please enter auth content', 'error');
     return;
   }
 
@@ -314,14 +366,14 @@ async function uploadAuth() {
     const data = await response.json();
 
     if (data.success) {
-      showToast(`上传成功: ${data.fileName}`, 'success');
+      showToast(`Imported: ${data.fileName}`, 'success');
       hideUploadModal();
       await loadQuotaData();
     } else {
-      showToast(`上传失败: ${data.error}`, 'error');
+      showToast(`Import failed: ${data.error}`, 'error');
     }
   } catch (error) {
-    showToast(`JSON 格式错误: ${error.message}`, 'error');
+    showToast(`Invalid JSON: ${error.message}`, 'error');
   }
 }
 
@@ -336,43 +388,49 @@ function showAccountDetail(index) {
   const title = document.getElementById('detailTitle');
   const content = document.getElementById('detailContent');
 
-  title.textContent = `📊 ${account.email} - 详细配额`;
+  title.textContent = account.email;
 
   if (!account.success) {
-    content.innerHTML = `<p class="error-message">获取配额失败: ${escapeHtml(account.error)}</p>`;
+    content.innerHTML = `<p class="error-message">Failed to fetch quota: ${escapeHtml(account.error)}</p>`;
   } else {
     const models = account.quota?.models || [];
+    const timestamp = account.quota?.timestamp ? new Date(account.quota.timestamp).toLocaleString() : 'Unknown';
+    
     content.innerHTML = `
-      <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-        <thead>
-          <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
-            <th style="text-align: left; padding: 10px; color: #888;">模型</th>
-            <th style="text-align: center; padding: 10px; color: #888;">状态</th>
-            <th style="text-align: right; padding: 10px; color: #888;">剩余配额</th>
-            <th style="text-align: right; padding: 10px; color: #888;">重置时间</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${models.map(model => {
-            const quota = model.quotaInfo;
-            const percentage = quota?.remainingPercentage ?? 0;
-            const status = getStatus(percentage);
-            const resetTime = quota?.resetTime ? new Date(quota.resetTime).toLocaleString() : '-';
-            
-            return `
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                <td style="padding: 12px 10px;">${escapeHtml(model.name || model.modelId)}</td>
-                <td style="text-align: center; padding: 12px 10px;">${status.emoji}</td>
-                <td style="text-align: right; padding: 12px 10px;" class="percentage ${status.class}">${quota ? percentage.toFixed(1) + '%' : '未知'}</td>
-                <td style="text-align: right; padding: 12px 10px; color: #666;">${resetTime}</td>
-              </tr>
-            `;
-          }).join('')}
-        </tbody>
-      </table>
-      <p style="margin-top: 20px; color: #666; font-size: 0.85rem;">
-        更新时间: ${account.quota?.timestamp ? new Date(account.quota.timestamp).toLocaleString() : '未知'}
-      </p>
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; min-width: 500px;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--border-color); text-align: left;">
+              <th style="padding: 12px; color: var(--text-secondary); font-weight: 500;">Model</th>
+              <th style="padding: 12px; color: var(--text-secondary); font-weight: 500;">Status</th>
+              <th style="padding: 12px; color: var(--text-secondary); font-weight: 500; text-align: right;">Quota</th>
+              <th style="padding: 12px; color: var(--text-secondary); font-weight: 500; text-align: right;">Reset Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${models.map(model => {
+              const quota = model.quotaInfo;
+              const percentage = quota?.remainingPercentage ?? 0;
+              const status = getStatus(percentage);
+              const resetTime = quota?.resetTime ? new Date(quota.resetTime).toLocaleString() : '-';
+              
+              return `
+                <tr style="border-bottom: 1px solid var(--border-color);">
+                  <td style="padding: 16px 12px; font-weight: 500;">${escapeHtml(model.name || model.modelId)}</td>
+                  <td style="padding: 16px 12px;">
+                    <span class="model-badge badge-${status.class}">${status.text}</span>
+                  </td>
+                  <td style="padding: 16px 12px; text-align: right; font-family: monospace;">${quota ? percentage.toFixed(1) + '%' : 'Unknown'}</td>
+                  <td style="padding: 16px 12px; text-align: right; color: var(--text-tertiary);">${resetTime}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-color); color: var(--text-tertiary); font-size: 0.875rem;">
+        Last updated: ${timestamp}
+      </div>
     `;
   }
 
@@ -390,13 +448,27 @@ function hideDetailModal() {
  * Show toast notification
  */
 function showToast(message, type = 'info') {
+  const existingToast = document.querySelector('.toast');
+  if (existingToast) existingToast.remove();
+
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.textContent = message;
+  
+  let icon = '';
+  if (type === 'success') {
+    icon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
+  } else if (type === 'error') {
+    icon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>`;
+  } else {
+    icon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>`;
+  }
+
+  toast.innerHTML = `${icon}<span>${message}</span>`;
   document.body.appendChild(toast);
 
   setTimeout(() => {
     toast.style.opacity = '0';
+    toast.style.transform = 'translateY(20px)';
     setTimeout(() => toast.remove(), 300);
   }, 3000);
 }
@@ -413,7 +485,7 @@ function escapeHtml(text) {
 
 // Close modals when clicking outside
 window.onclick = function(event) {
-  if (event.target.classList.contains('modal')) {
+  if (event.target.classList.contains('modal-backdrop')) {
     event.target.style.display = 'none';
   }
 };

@@ -4,60 +4,101 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Antigravity Quota Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>🚀 Antigravity Quota Monitor</h1>
-      <div class="header-actions">
-        <button id="refreshBtn" class="btn btn-primary" onclick="refreshAll()">
-          🔄 刷新全部
+  <div class="app-layout">
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+            <path fill-rule="evenodd" d="M14.615 1.595a.75.75 0 01.359.852L12.982 9.75h7.268a.75.75 0 01.548 1.262l-10.5 11.25a.75.75 0 01-1.272-.71l1.992-7.302H3.75a.75.75 0 01-.548-1.262l10.5-11.25a.75.75 0 01.913-.143z" clip-rule="evenodd" />
+          </svg>
+        </div>
+        <h1>Antigravity <span class="highlight">Quota</span></h1>
+      </div>
+      
+      <div class="header-controls">
+        <div class="status-indicator">
+          <span id="lastUpdate">Updating...</span>
+        </div>
+        
+        <label class="toggle-switch">
+          <input type="checkbox" id="autoRefreshCheck" onchange="toggleAutoRefresh()">
+          <span class="toggle-slider"></span>
+          <span class="toggle-label">Auto Refresh</span>
+        </label>
+
+        <button id="refreshBtn" class="icon-btn primary" onclick="refreshAll()" title="刷新全部">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
         </button>
-        <button id="uploadBtn" class="btn btn-secondary" onclick="showUploadModal()">
-          📤 上传Auth文件
+        
+        <button id="uploadBtn" class="icon-btn secondary" onclick="showUploadModal()" title="上传Auth文件">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+          </svg>
         </button>
       </div>
     </header>
 
-    <div class="status-bar">
-      <span id="lastUpdate">最后更新: 未知</span>
-      <span id="autoRefresh">
-        <label>
-          <input type="checkbox" id="autoRefreshCheck" onchange="toggleAutoRefresh()">
-          自动刷新 (60秒)
-        </label>
-      </span>
-    </div>
-
-    <div id="accounts" class="accounts-container">
-      <div class="loading">
+    <main id="accounts" class="accounts-grid">
+      <div class="loading-state">
         <div class="spinner"></div>
-        <p>加载中...</p>
+        <p>Loading quota data...</p>
+      </div>
+    </main>
+  </div>
+
+  <!-- Upload Modal -->
+  <div id="uploadModal" class="modal-backdrop">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2>Import Auth Configuration</h2>
+        <button class="close-btn" onclick="hideUploadModal()">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="helper-text">Paste the content of your auth JSON file or upload it directly.</p>
+        <div class="input-group">
+          <textarea id="authContent" placeholder='{"access_token":"...","refresh_token":"...","email":"..."}'></textarea>
+        </div>
+        <div class="file-drop-area">
+          <input type="file" id="fileInput" accept=".json" onchange="handleFileSelect(event)">
+          <div class="drop-message">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+            </svg>
+            <span>Select JSON file</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="hideUploadModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="uploadAuth()">Import</button>
       </div>
     </div>
   </div>
 
-  <!-- 上传模态框 -->
-  <div id="uploadModal" class="modal">
-    <div class="modal-content">
-      <span class="close" onclick="hideUploadModal()">&times;</span>
-      <h2>上传 Auth 文件</h2>
-      <p>请粘贴 auth JSON 内容或选择文件：</p>
-      <textarea id="authContent" placeholder='{"access_token":"...","refresh_token":"...","email":"..."}'></textarea>
-      <div class="modal-actions">
-        <input type="file" id="fileInput" accept=".json" onchange="handleFileSelect(event)">
-        <button class="btn btn-primary" onclick="uploadAuth()">上传</button>
+  <!-- Detail Modal -->
+  <div id="detailModal" class="modal-backdrop">
+    <div class="modal-panel modal-large">
+      <div class="modal-header">
+        <h2 id="detailTitle">Account Details</h2>
+        <button class="close-btn" onclick="hideDetailModal()">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
-    </div>
-  </div>
-
-  <!-- 详情模态框 -->
-  <div id="detailModal" class="modal">
-    <div class="modal-content modal-large">
-      <span class="close" onclick="hideDetailModal()">&times;</span>
-      <h2 id="detailTitle">账号详情</h2>
-      <div id="detailContent"></div>
+      <div id="detailContent" class="modal-body"></div>
     </div>
   </div>
 
