@@ -119,6 +119,14 @@ function renderAccounts(results) {
     }
 
     const models = account.quota?.models || [];
+    
+    // Sort models by name/ID alphabetically
+    models.sort((a, b) => {
+        const nameA = (a.name || a.modelId || '').toLowerCase();
+        const nameB = (b.name || b.modelId || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
+
     const initials = account.email.substring(0, 2).toUpperCase();
     
     return `
@@ -394,6 +402,14 @@ function showAccountDetail(index) {
     content.innerHTML = `<p class="error-message">Failed to fetch quota: ${escapeHtml(account.error)}</p>`;
   } else {
     const models = account.quota?.models || [];
+    
+    // Sort models by name/ID alphabetically for detail view as well
+    models.sort((a, b) => {
+        const nameA = (a.name || a.modelId || '').toLowerCase();
+        const nameB = (b.name || b.modelId || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
+
     const timestamp = account.quota?.timestamp ? new Date(account.quota.timestamp).toLocaleString() : 'Unknown';
     
     content.innerHTML = `
