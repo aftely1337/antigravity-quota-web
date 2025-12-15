@@ -15,6 +15,21 @@ const ANTIGRAVITY_BASE_URLS = [
 const MODELS_PATH = '/v1internal:fetchAvailableModels';
 const USER_AGENT = 'antigravity/1.11.5 windows/amd64';
 
+// 模型ID到显示名称的映射
+const MODEL_NAME_MAPPING = {
+  'models/rev19-uic3-1p': 'Gemini 2.5 Computer Use', // Mapping for Rev19 Uic3 1p
+  'rev19-uic3-1p': 'Gemini 2.5 Computer Use', // Add mapping without prefix just in case
+  // Add other known mappings here
+};
+
+// 需要忽略的模型ID模式或特定ID（支持连字符和下划线）
+const IGNORED_MODELS = [
+  'chat-20706',
+  'chat-23310',
+  'chat_20706',
+  'chat_23310'
+];
+
 /**
  * 获取可用模型列表和配额信息
  * @param {string} accessToken - access token
@@ -64,10 +79,29 @@ async function fetchModelsAndQuota(accessToken) {
 function parseModelsResponse(data) {
   const models = [];
   
+  // Helper function to check if model should be ignored
+  const shouldIgnore = (modelId) => {
+    if (!modelId) return true;
+    // Normalize: lowercase, remove 'models/' prefix, replace both - and _ for comparison
+    const normalizedId = modelId.toLowerCase().replace('models/', '');
+    const normalizeForCompare = (s) => s.toLowerCase().replace(/[-_]/g, '');
+    
+    const isIgnored = IGNORED_MODELS.some(ignored => {
+      const normalizedIgnored = normalizeForCompare(ignored);
+      return normalizeForCompare(normalizedId) === normalizedIgnored;
+    });
+    if (isIgnored) {
+      console.log(`Ignoring model: ${modelId}`);
+    }
+    return isIgnored;
+  };
+
   // 解析models数组（如果存在）
   if (data.models && typeof data.models === 'object') {
     for (const [modelId, modelInfo] of Object.entries(data.models)) {
       if (modelId && modelInfo) {
+        if (shouldIgnore(modelId)) continue;
+
         const model = parseModelEntry(modelId, modelInfo);
         if (model) {
           models.push(model);
@@ -78,9 +112,10 @@ function parseModelsResponse(data) {
   
   // 解析agentModelSorts（包含常用模型）
   if (data.agentModelSorts && Array.isArray(data.agentModelSorts)) {
-    // 这些是模型ID引用，我们可以从中提取模型名称
     for (const modelId of data.agentModelSorts) {
       if (typeof modelId === 'string' && !models.find(m => m.modelId === modelId)) {
+        if (shouldIgnore(modelId)) continue;
+
         models.push({
           modelId: modelId,
           name: formatModelName(modelId),
@@ -95,6 +130,8 @@ function parseModelsResponse(data) {
   if (data.commandModelIds && Array.isArray(data.commandModelIds)) {
     for (const modelId of data.commandModelIds) {
       if (typeof modelId === 'string' && !models.find(m => m.modelId === modelId)) {
+        if (shouldIgnore(modelId)) continue;
+
         models.push({
           modelId: modelId,
           name: formatModelName(modelId),
@@ -109,6 +146,8 @@ function parseModelsResponse(data) {
   if (data.tabModelIds && Array.isArray(data.tabModelIds)) {
     for (const modelId of data.tabModelIds) {
       if (typeof modelId === 'string' && !models.find(m => m.modelId === modelId)) {
+        if (shouldIgnore(modelId)) continue;
+
         models.push({
           modelId: modelId,
           name: formatModelName(modelId),
@@ -119,12 +158,16 @@ function parseModelsResponse(data) {
     }
   }
   
+  // Last resort filtering: filter the final array
+  // This handles cases where models might be added via other paths or logic I missed
+  const filteredModels = models.filter(m => !shouldIgnore(m.modelId) && !shouldIgnore(m.name));
+
   return {
     timestamp: new Date().toISOString(),
-    models: models,
+    models: filteredModels,
     raw: {
       defaultAgentModelId: data.defaultAgentModelId,
-      modelCount: models.length
+      modelCount: filteredModels.length
     }
   };
 }
@@ -139,7 +182,7 @@ function parseModelEntry(modelId, modelInfo) {
   
   const model = {
     modelId: modelId,
-    name: modelInfo.displayName || formatModelName(modelId),
+    name: MODEL_NAME_MAPPING[modelId] || MODEL_NAME_MAPPING[modelId.replace('models/', '')] || modelInfo.displayName || formatModelName(modelId),
     displayName: modelInfo.displayName,
     category: modelInfo.category || 'unknown',
     quotaInfo: null
@@ -167,6 +210,14 @@ function parseModelEntry(modelId, modelInfo) {
 function formatModelName(modelId) {
   if (!modelId) return 'Unknown';
   
+  // Check mapping first
+  if (MODEL_NAME_MAPPING[modelId]) {
+    return MODEL_NAME_MAPPING[modelId];
+  }
+  if (MODEL_NAME_MAPPING[modelId.replace('models/', '')]) {
+    return MODEL_NAME_MAPPING[modelId.replace('models/', '')];
+  }
+
   // 移除前缀并格式化
   let name = modelId
     .replace('models/', '')
