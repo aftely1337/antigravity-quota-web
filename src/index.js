@@ -15,6 +15,9 @@ const PORT = process.env.PORT || 3078;
 // 配置目录
 const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, '..', 'config');
 
+// OAuth State存储 (简单内存存储)
+const oauthStates = new Set();
+
 // 静态文件服务
 app.use(express.static(path.join(__dirname, '..', 'public')));
 app.use(express.json());
@@ -215,6 +218,126 @@ app.delete('/api/accounts/:email', (req, res) => {
     res.json({ success: true, message: 'Account deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 下载账号凭证
+ */
+app.get('/api/accounts/:email/download', (req, res) => {
+  try {
+    const email = decodeURIComponent(req.params.email);
+    const authFiles = auth.scanAuthFiles(CONFIG_DIR);
+    
+    const authFile = authFiles.find(f =>
+      f.authData.email === email ||
+      path.basename(f.filePath, '.json') === email
+    );
+    
+    if (!authFile) {
+      return res.status(404).json({ success: false, error: 'Account not found' });
+    }
+    
+    const fileName = path.basename(authFile.filePath);
+    res.download(authFile.filePath, fileName);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 启动OAuth登录流程
+ */
+app.get('/api/auth/login', (req, res) => {
+  try {
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/callback`;
+    const { url, state } = auth.generateAuthUrl(redirectUri);
+    
+    // 存储state用于验证
+    oauthStates.add(state);
+    
+    // 5分钟后清除state
+    setTimeout(() => oauthStates.delete(state), 5 * 60 * 1000);
+    
+    res.json({ success: true, url });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * OAuth回调处理
+ */
+app.get('/api/auth/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  
+  if (error) {
+    return res.status(400).send(`Authentication failed: ${error}`);
+  }
+  
+  if (!code || !state) {
+    return res.status(400).send('Missing code or state');
+  }
+  
+  if (!oauthStates.has(state)) {
+    return res.status(400).send('Invalid state');
+  }
+  
+  oauthStates.delete(state);
+  
+  try {
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/callback`;
+    const tokenResp = await auth.exchangeCodeForToken(code, redirectUri);
+    const userInfo = await auth.getUserInfo(tokenResp.access_token);
+    
+    const email = userInfo.email;
+    const now = Date.now();
+    
+    const authData = {
+      access_token: tokenResp.access_token,
+      refresh_token: tokenResp.refresh_token,
+      expires_in: tokenResp.expires_in,
+      timestamp: now,
+      expired: new Date(now + tokenResp.expires_in * 1000).toISOString(),
+      type: 'antigravity',
+      email: email
+    };
+    
+    const sanitizedEmail = email.replace(/[^a-zA-Z0-9@._-]/g, '_');
+    const fileName = `antigravity-${sanitizedEmail}.json`;
+    const filePath = path.join(CONFIG_DIR, fileName);
+    
+    if (!fs.existsSync(CONFIG_DIR)) {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+    
+    auth.saveAuthFile(filePath, authData);
+    
+    // 返回HTML，自动关闭窗口并通知父窗口
+    res.send(`
+      <html>
+        <head>
+          <title>Authentication Successful</title>
+        </head>
+        <body>
+          <h1>Authentication Successful!</h1>
+          <p>You can close this window now.</p>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'AUTH_SUCCESS', email: '${email}' }, '*');
+              window.close();
+            } else {
+              setTimeout(() => {
+                window.location.href = '/';
+              }, 2000);
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Auth callback error:', error);
+    res.status(500).send(`Authentication failed: ${error.message}`);
   }
 });
 

@@ -29,6 +29,7 @@ const translations = {
     deleteConfirm: 'Are you sure you want to delete account',
     deleteWarning: 'This action cannot be undone. The auth file will be permanently removed.',
     delete: 'Delete',
+    download: 'Download',
     retry: 'Retry',
     view: 'View',
     refresh: 'Refresh',
@@ -59,6 +60,7 @@ const translations = {
     importFailed: 'Import failed',
     refreshFailed: 'Refresh failed',
     deleteFailed: 'Delete failed',
+    downloadFailed: 'Download failed',
     invalidJson: 'Invalid JSON',
     enterAuthContent: 'Please enter auth content',
     connectionError: 'Connection Error',
@@ -83,6 +85,7 @@ const translations = {
     deleteConfirm: '您确定要删除账号',
     deleteWarning: '此操作无法撤销。Auth 文件将被永久删除。',
     delete: '删除',
+    download: '下载',
     retry: '重试',
     view: '查看',
     refresh: '刷新',
@@ -113,6 +116,7 @@ const translations = {
     importFailed: '导入失败',
     refreshFailed: '刷新失败',
     deleteFailed: '删除失败',
+    downloadFailed: '下载失败',
     invalidJson: '无效的 JSON',
     enterAuthContent: '请输入 auth 内容',
     connectionError: '连接错误',
@@ -344,6 +348,11 @@ function renderAccounts() {
           <div class="account-controls">
             <button class="btn btn-secondary btn-sm" onclick="refreshAccount('${escapeHtml(account.email)}')">${i18n('refresh')}</button>
             <button class="btn btn-secondary btn-sm" onclick="showAccountDetail(${originalIndex})">${i18n('view')}</button>
+            <button class="btn btn-secondary btn-sm" onclick="downloadAccount('${escapeHtml(account.email)}')" title="${i18n('download')}">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 16px; height: 16px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3-3m0 0l3-3m-3 3h7.5" transform="rotate(-90 12 12)" />
+              </svg>
+            </button>
             <button class="btn btn-danger btn-sm" onclick="deleteAccount('${escapeHtml(account.email)}')" title="${i18n('deleteTitle')}">${i18n('delete')}</button>
           </div>
         </div>
@@ -594,6 +603,44 @@ async function confirmDelete() {
   } finally {
     btn.disabled = false;
     btn.textContent = originalText;
+  }
+}
+
+/**
+ * Download account auth file
+ */
+async function downloadAccount(email) {
+  try {
+    const response = await fetch(`/api/accounts/${encodeURIComponent(email)}/download`);
+    
+    if (response.ok) {
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      
+      // Get filename from Content-Disposition header if available, otherwise construct it
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let fileName = `antigravity-${email.replace(/[^a-zA-Z0-9@._-]/g, '_')}.json`;
+      
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) {
+          fileName = match[1];
+        }
+      }
+      
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } else {
+      const data = await response.json();
+      showToast(`${i18n('downloadFailed')}: ${data.error}`, 'error');
+    }
+  } catch (error) {
+    showToast(`${i18n('downloadFailed')}: ${error.message}`, 'error');
   }
 }
 

@@ -7,11 +7,14 @@ const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // Antigravity OAuth配置 (从CLIProxyAPI提取)
 const ANTIGRAVITY_CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
 const ANTIGRAVITY_CLIENT_SECRET = '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';
 const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const OAUTH_AUTH_URL = 'https://accounts.google.com/o/oauth2/auth';
+const USER_INFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
 
 // 代理配置 - 从环境变量读取
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
@@ -270,6 +273,91 @@ function scanAuthFiles(configDir) {
   return authFiles;
 }
 
+/**
+ * 生成OAuth登录URL
+ * @param {string} redirectUri - 回调URL
+ * @returns {Object} { url, state }
+ */
+function generateAuthUrl(redirectUri) {
+  const state = crypto.randomBytes(16).toString('hex');
+  const scopes = [
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/cclog",
+    "https://www.googleapis.com/auth/experimentsandconfigs"
+  ];
+
+  const params = new URLSearchParams({
+    client_id: ANTIGRAVITY_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: scopes.join(' '),
+    access_type: 'offline',
+    state: state,
+    prompt: 'consent'
+  });
+
+  return {
+    url: `${OAUTH_AUTH_URL}?${params.toString()}`,
+    state: state
+  };
+}
+
+/**
+ * 使用Authorization Code换取Token
+ * @param {string} code - Authorization Code
+ * @param {string} redirectUri - 回调URL
+ * @returns {Promise<Object>} Token响应
+ */
+async function exchangeCodeForToken(code, redirectUri) {
+  const postData = new URLSearchParams({
+    code: code,
+    client_id: ANTIGRAVITY_CLIENT_ID,
+    client_secret: ANTIGRAVITY_CLIENT_SECRET,
+    redirect_uri: redirectUri,
+    grant_type: 'authorization_code'
+  }).toString();
+
+  const options = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(postData)
+    }
+  };
+
+  const response = await httpsRequestWithProxy(OAUTH_TOKEN_URL, options, postData);
+  
+  if (response.statusCode !== 200) {
+    throw new Error(`Token exchange failed: ${response.statusCode} - ${response.data}`);
+  }
+  
+  return JSON.parse(response.data);
+}
+
+/**
+ * 获取用户信息
+ * @param {string} accessToken - Access Token
+ * @returns {Promise<Object>} 用户信息
+ */
+async function getUserInfo(accessToken) {
+  const options = {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  };
+
+  const response = await httpsRequestWithProxy(USER_INFO_URL, options);
+  
+  if (response.statusCode !== 200) {
+    throw new Error(`Failed to get user info: ${response.statusCode} - ${response.data}`);
+  }
+  
+  return JSON.parse(response.data);
+}
+
 module.exports = {
   loadAuthFile,
   saveAuthFile,
@@ -278,6 +366,9 @@ module.exports = {
   ensureValidToken,
   scanAuthFiles,
   httpsRequestWithProxy,
+  generateAuthUrl,
+  exchangeCodeForToken,
+  getUserInfo,
   ANTIGRAVITY_CLIENT_ID,
   ANTIGRAVITY_CLIENT_SECRET,
   PROXY_URL
