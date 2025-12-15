@@ -10,7 +10,7 @@ const auth = require('./auth');
 const quota = require('./quota');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3078;
 
 // 配置目录
 const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, '..', 'config');
@@ -186,6 +186,35 @@ app.post('/api/upload', express.text({ type: '*/*' }), (req, res) => {
     });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 删除账号
+ */
+app.delete('/api/accounts/:email', (req, res) => {
+  try {
+    const email = decodeURIComponent(req.params.email);
+    const authFiles = auth.scanAuthFiles(CONFIG_DIR);
+    
+    const authFile = authFiles.find(f =>
+      f.authData.email === email ||
+      path.basename(f.filePath, '.json') === email
+    );
+    
+    if (!authFile) {
+      return res.status(404).json({ success: false, error: 'Account not found' });
+    }
+    
+    // 删除文件
+    fs.unlinkSync(authFile.filePath);
+    
+    // 清除缓存
+    quotaCache.delete(email);
+    
+    res.json({ success: true, message: 'Account deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

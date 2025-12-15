@@ -55,7 +55,7 @@ docker build -t antigravity-quota-web .
 # 运行容器
 docker run -d \
   --name antigravity-quota-web \
-  -p 3000:3000 \
+  -p 3078:3078 \
   -v $(pwd)/config:/app/config \
   --restart unless-stopped \
   antigravity-quota-web
@@ -97,11 +97,11 @@ npm start
 docker-compose up -d
 ```
 
-服务器默认运行在 http://localhost:3000
+服务器默认运行在 http://localhost:3078
 
 ### 3. 访问 Web 面板
 
-打开浏览器访问 http://localhost:3000
+打开浏览器访问 http://localhost:3078
 
 ## API 接口
 
@@ -120,7 +120,7 @@ docker-compose up -d
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `PORT` | 3000 | 服务器端口 |
+| `PORT` | 3078 | 服务器端口 |
 | `CONFIG_DIR` | ./config | auth 文件存放目录 |
 
 示例：
@@ -137,7 +137,7 @@ PORT=8080 CONFIG_DIR=/data/auth npm start
 
 | 配置项 | 说明 |
 |--------|------|
-| `ports: "3000:3000"` | 端口映射，可修改为其他端口如 `"8080:3000"` |
+| `ports: "3067:3078"` | 端口映射，可修改为其他端口如 `"8080:3078"` |
 | `volumes: ./config:/app/config` | 配置目录挂载，用于持久化 auth 文件 |
 | `restart: unless-stopped` | 容器异常退出时自动重启 |
 | `healthcheck` | 健康检查，确保服务正常运行 |

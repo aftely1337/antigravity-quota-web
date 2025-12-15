@@ -23,42 +23,62 @@
       
       <div class="header-controls">
         <div class="status-indicator">
-          <span id="lastUpdate">Updating...</span>
+          <span id="lastUpdate" data-i18n="updating">Updating...</span>
         </div>
         
         <label class="toggle-switch">
           <input type="checkbox" id="autoRefreshCheck" onchange="toggleAutoRefresh()">
           <span class="toggle-slider"></span>
-          <span class="toggle-label">Auto Refresh</span>
+          <span class="toggle-label" data-i18n="autoRefresh">Auto Refresh</span>
         </label>
 
-        <button id="refreshBtn" class="icon-btn primary" onclick="refreshAll()" title="刷新全部">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-          </svg>
+        <button id="refreshBtn" class="btn btn-primary" onclick="refreshAll()" data-i18n="refreshAll">
+          刷新全部
         </button>
         
-        <button id="uploadBtn" class="icon-btn secondary" onclick="showUploadModal()" title="上传Auth文件">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+        <button id="uploadBtn" class="btn btn-secondary" onclick="showUploadModal()" data-i18n="uploadAuth">
+          上传Auth
+        </button>
+
+        <button class="btn btn-ghost" onclick="toggleLanguage()" title="Switch Language">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 24px; height: 24px;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S12 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S12 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
           </svg>
         </button>
       </div>
     </header>
 
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="search-wrapper">
+        <svg xmlns="http://www.w3.org/2000/svg" class="search-icon" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
+        </svg>
+        <input type="text" id="searchInput" placeholder="搜索账号..." data-i18n-placeholder="searchPlaceholder" oninput="handleSearch(this.value)">
+      </div>
+      <div class="toolbar-stats" id="accountStats">
+        <!-- Will be populated by JS -->
+      </div>
+    </div>
+
     <main id="accounts" class="accounts-grid">
       <div class="loading-state">
         <div class="spinner"></div>
-        <p>Loading quota data...</p>
+        <p data-i18n="loading">Loading quota data...</p>
       </div>
     </main>
+
+    <!-- Pagination -->
+    <div class="pagination" id="pagination">
+      <!-- Will be populated by JS -->
+    </div>
   </div>
 
   <!-- Upload Modal -->
   <div id="uploadModal" class="modal-backdrop">
     <div class="modal-panel">
       <div class="modal-header">
-        <h2>Import Auth Configuration</h2>
+        <h2 data-i18n="importTitle">Import Auth Configuration</h2>
         <button class="close-btn" onclick="hideUploadModal()">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -66,7 +86,7 @@
         </button>
       </div>
       <div class="modal-body">
-        <p class="helper-text">Paste the content of your auth JSON file or upload it directly.</p>
+        <p class="helper-text" data-i18n="importDesc">Paste the content of your auth JSON file or upload it directly.</p>
         <div class="input-group">
           <textarea id="authContent" placeholder='{"access_token":"...","refresh_token":"...","email":"..."}'></textarea>
         </div>
@@ -76,13 +96,13 @@
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
             </svg>
-            <span>Select JSON file</span>
+            <span data-i18n="selectFile">Select JSON file</span>
           </div>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="hideUploadModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="uploadAuth()">Import</button>
+        <button class="btn btn-ghost" onclick="hideUploadModal()" data-i18n="cancel">Cancel</button>
+        <button class="btn btn-primary" onclick="uploadAuth()" data-i18n="import">Import</button>
       </div>
     </div>
   </div>
@@ -91,7 +111,7 @@
   <div id="detailModal" class="modal-backdrop">
     <div class="modal-panel modal-large">
       <div class="modal-header">
-        <h2 id="detailTitle">Account Details</h2>
+        <h2 id="detailTitle" data-i18n="accountDetails">Account Details</h2>
         <button class="close-btn" onclick="hideDetailModal()">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -99,6 +119,28 @@
         </button>
       </div>
       <div id="detailContent" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Delete Confirmation Modal -->
+  <div id="deleteModal" class="modal-backdrop">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 data-i18n="deleteTitle">Delete Account</h2>
+        <button class="close-btn" onclick="hideDeleteModal()">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p><span data-i18n="deleteConfirm">Are you sure you want to delete account</span> <strong id="deleteAccountEmail"></strong>?</p>
+        <p style="color: var(--text-secondary); margin-top: 8px; font-size: 0.875rem;" data-i18n="deleteWarning">This action cannot be undone. The auth file will be permanently removed.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="hideDeleteModal()" data-i18n="cancel">Cancel</button>
+        <button class="btn btn-danger" id="confirmDeleteBtn" data-i18n="delete">Delete</button>
+      </div>
     </div>
   </div>
 

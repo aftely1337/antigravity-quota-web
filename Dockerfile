@@ -18,11 +18,11 @@ COPY public/ ./public/
 RUN mkdir -p /app/config
 
 # 设置环境变量
-ENV PORT=3000
+ENV PORT=3078
 ENV CONFIG_DIR=/app/config
 
 # 暴露端口
-EXPOSE 3000
+EXPOSE 3078
 
 # 启动应用
 CMD ["node", "src/index.js"]

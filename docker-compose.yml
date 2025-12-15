@@ -6,15 +6,15 @@ services:
     container_name: antigravity-quota-web
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3078:3078"
     environment:
-      - PORT=3000
+      - PORT=3078
       - CONFIG_DIR=/app/config
     volumes:
       # 挂载配置目录，用于存放 auth JSON 文件
       - ./config:/app/config
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3078/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

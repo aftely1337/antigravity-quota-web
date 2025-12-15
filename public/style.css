@@ -50,6 +50,95 @@ body {
   box-shadow: var(--card-shadow);
 }
 
+/* Toolbar */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.search-wrapper {
+  position: relative;
+  flex: 1;
+  max-width: 400px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  color: var(--text-tertiary);
+}
+
+.search-wrapper input {
+  width: 100%;
+  padding: 10px 12px 10px 40px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.search-wrapper input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.toolbar-stats {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 40px;
+  padding-bottom: 40px;
+}
+
+.page-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.875rem;
+}
+
+.page-btn:hover:not(:disabled) {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.page-btn.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+.page-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .logo-area {
   display: flex;
   align-items: center;
@@ -134,64 +223,52 @@ input:checked + .toggle-slider:before {
 }
 
 /* Buttons */
-.icon-btn {
-  background: var(--bg-tertiary); /* Better visibility */
-  border: 1px solid var(--border-color); /* Add border for contrast */
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 8px;
-  color: var(--text-primary); /* Brighter icon color */
-  transition: all 0.2s;
-  display: flex;
+.btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.icon-btn:hover {
-  background: var(--bg-secondary);
-  border-color: var(--accent-primary);
-  color: var(--accent-primary);
-}
-
-.icon-btn.primary {
-  background: var(--accent-primary);
-  color: white;
-  border-color: var(--accent-primary);
-}
-
-.icon-btn.primary:hover {
-  background: var(--accent-secondary);
-  border-color: var(--accent-secondary);
-  color: white;
-}
-
-.icon-btn.secondary {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-}
-
-.icon-btn.secondary:hover {
-    background: var(--bg-secondary);
-    border-color: var(--text-secondary);
-}
-
-.btn {
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-weight: 500;
+  padding: 8px 20px;
+  border-radius: 9999px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
-  border: none;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
   font-size: 0.875rem;
+  line-height: 1;
+  white-space: nowrap;
+  min-height: 38px;
 }
 
 .btn-primary {
   background: var(--accent-primary);
   color: white;
+  border-color: transparent;
 }
 
 .btn-primary:hover {
   background: var(--accent-secondary);
+}
+
+.btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-secondary);
+  border-color: var(--text-secondary);
+}
+
+.btn-danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--error-color);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: var(--error-color);
 }
 
 .btn-ghost {
@@ -205,8 +282,9 @@ input:checked + .toggle-slider:before {
 }
 
 .btn-sm {
-  padding: 4px 12px;
+  padding: 6px 14px;
   font-size: 0.75rem;
+  min-height: 30px;
 }
 
 /* Grid Layout */
@@ -244,6 +322,8 @@ input:checked + .toggle-slider:before {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0; /* Important for text truncation */
+  margin-right: 15px; /* Add spacing between info and buttons */
 }
 
 .avatar {
@@ -257,12 +337,16 @@ input:checked + .toggle-slider:before {
   font-weight: 600;
   color: white;
   font-size: 0.875rem;
+  flex-shrink: 0; /* Prevent avatar from shrinking */
 }
 
 .account-email {
   font-weight: 500;
   color: var(--text-primary);
   font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .account-controls {
