@@ -10,6 +10,7 @@ let itemsPerPage = 12;
 let searchQuery = '';
 let accountToDelete = null;
 let currentLang = 'zh'; // Default to Chinese
+let expandedAccounts = new Set(); // Track expanded account indices
 
 const translations = {
   en: {
@@ -66,7 +67,14 @@ const translations = {
     connectionError: 'Connection Error',
     tryAgain: 'Try Again',
     failedToFetch: 'Failed to fetch quota',
-    noModelQuota: 'No model quota information available.'
+    noModelQuota: 'No model quota information available.',
+    showModels: 'Show Models',
+    hideModels: 'Hide Models',
+    totalQuota: 'Total Quota',
+    activeAccounts: 'Active Accounts',
+    average: 'Avg',
+    total: 'Total',
+    showing: 'Showing'
   },
   zh: {
     updating: '更新中...',
@@ -122,7 +130,14 @@ const translations = {
     connectionError: '连接错误',
     tryAgain: '重试',
     failedToFetch: '获取配额失败',
-    noModelQuota: '暂无模型配额信息。'
+    noModelQuota: '暂无模型配额信息。',
+    showModels: '显示模型',
+    hideModels: '隐藏模型',
+    totalQuota: '总配额',
+    activeAccounts: '活跃账号',
+    average: '平均',
+    total: '总计',
+    showing: '显示'
   }
 };
 
@@ -140,6 +155,7 @@ function toggleLanguage() {
   currentLang = currentLang === 'zh' ? 'en' : 'zh';
   updateLanguage();
   renderAccounts(); // Re-render to update dynamic content
+  renderGlobalSummary(); // Re-render global summary for language switch
 }
 
 /**
@@ -214,6 +230,7 @@ async function loadQuotaData() {
     }
 
     quotaData = data.results;
+    renderGlobalSummary();
     renderAccounts();
     updateLastRefreshTime();
   } catch (error) {
@@ -252,6 +269,111 @@ function changePage(page) {
 }
 
 /**
+ * Get account's Claude quota (unified logic for both global summary and account card)
+ */
+function getAccountClaudeQuota(models) {
+  const claudeModel = models.find(m => m.modelId.toLowerCase().includes('claude') && m.quotaInfo);
+  return claudeModel?.quotaInfo || null;
+}
+
+/**
+ * Get account's Gemini quota (unified logic for both global summary and account card)
+ */
+function getAccountGeminiQuota(models) {
+  const geminiModel = models.find(m =>
+    m.modelId.toLowerCase().includes('gemini-3-pro') && m.quotaInfo
+  ) || models.find(m =>
+    m.modelId.toLowerCase().includes('gemini') && m.quotaInfo
+  );
+  return geminiModel?.quotaInfo || null;
+}
+
+/**
+ * Render global summary cards
+ */
+function renderGlobalSummary() {
+  const container = document.querySelector('.shared-quota-card');
+  
+  // Calculate global stats
+  let claudeTotal = 0;
+  let claudeCount = 0;
+  let geminiTotal = 0;
+  let geminiCount = 0;
+  
+  quotaData.forEach(account => {
+    if (!account.success || !account.quota?.models) return;
+    
+    const models = account.quota.models;
+    
+    // Claude - use unified function
+    const claudeQuota = getAccountClaudeQuota(models);
+    if (claudeQuota) {
+      claudeTotal += claudeQuota.remainingPercentage || 0;
+      claudeCount++;
+    }
+    
+    // Gemini - use unified function
+    const geminiQuota = getAccountGeminiQuota(models);
+    if (geminiQuota) {
+      geminiTotal += geminiQuota.remainingPercentage || 0;
+      geminiCount++;
+    }
+  });
+
+  // If no container exists, create it before the accounts grid
+  if (!container) {
+    const main = document.getElementById('accounts');
+    const summarySection = document.createElement('div');
+    summarySection.className = 'shared-quota-card';
+    main.parentNode.insertBefore(summarySection, main);
+  }
+  
+  const summaryContainer = document.querySelector('.shared-quota-card');
+  if (claudeCount === 0 && geminiCount === 0) {
+    summaryContainer.style.display = 'none';
+    return;
+  }
+  
+  summaryContainer.style.display = 'block';
+  summaryContainer.innerHTML = `
+    <div class="shared-quota-title">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 24px; height: 24px;">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+      </svg>
+      ${i18n('totalQuota')}
+    </div>
+    <div class="shared-quota-grid">
+      ${renderGlobalSummaryItem('Claude', claudeTotal, claudeCount)}
+      ${renderGlobalSummaryItem('Gemini', geminiTotal, geminiCount)}
+    </div>
+  `;
+}
+
+function renderGlobalSummaryItem(name, totalPercentage, count) {
+  if (count === 0) return '';
+  
+  // Calculate average percentage
+  const avgPercentage = totalPercentage / count;
+  const status = getStatus(avgPercentage);
+  
+  return `
+    <div class="shared-quota-item">
+      <div class="shared-quota-header">
+        <span class="shared-quota-name">${name}</span>
+        <span class="model-badge badge-${status.class}">${i18n(status.text.toLowerCase())}</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-bar progress-${status.class}" style="width: ${Math.max(0, Math.min(100, avgPercentage))}%"></div>
+      </div>
+      <div class="model-meta">
+        <span>${i18n('activeAccounts')}: ${count}</span>
+        <span>${i18n('average')}: ${avgPercentage.toFixed(1)}%</span>
+      </div>
+    </div>
+  `;
+}
+
+/**
  * Render accounts and their quota
  */
 function renderAccounts() {
@@ -272,7 +394,7 @@ function renderAccounts() {
   
   // Update stats
   if (statsContainer) {
-    statsContainer.textContent = `Total: ${quotaData.length} | Showing: ${totalItems}`;
+    statsContainer.textContent = `${i18n('total')}: ${quotaData.length} | ${i18n('showing')}: ${totalItems}`;
   }
 
   // Handle empty state
@@ -337,6 +459,11 @@ function renderAccounts() {
     });
 
     const initials = account.email.substring(0, 2).toUpperCase();
+    const isExpanded = expandedAccounts.has(originalIndex);
+
+    // Calculate shared quotas - use unified functions
+    const claudeQuota = getAccountClaudeQuota(models);
+    const geminiQuota = getAccountGeminiQuota(models);
     
     return `
       <div class="account-card">
@@ -380,13 +507,24 @@ function renderAccounts() {
             </div>
           </div>
         </div>
-        <div class="account-models">
+        <div class="quota-summary">
+          ${claudeQuota ? renderQuotaSummaryItem('Claude', claudeQuota) : ''}
+          ${geminiQuota ? renderQuotaSummaryItem('Gemini', geminiQuota) : ''}
+        </div>
+
+        <div id="models-${originalIndex}" class="account-models ${isExpanded ? '' : 'collapsed'}">
           ${models.length > 0 ? models.map(model => renderModelCard(model)).join('') : `
             <div class="empty-state" style="padding: 20px;">
               <p>${i18n('noModelQuota')}</p>
             </div>
           `}
         </div>
+        <button class="toggle-models-btn ${isExpanded ? 'active' : ''}" onclick="toggleModels(${originalIndex})">
+          <span id="toggle-text-${originalIndex}">${isExpanded ? i18n('hideModels') : i18n('showModels')} (${models.length})</span>
+          <svg id="toggle-icon-${originalIndex}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
+        </button>
       </div>
     `;
   }).join('');
@@ -401,7 +539,7 @@ function renderPagination(current, total) {
   const container = document.getElementById('pagination');
   if (!container) return;
 
-  if (total <= 1) {
+  if (total < 1) {
     container.innerHTML = '';
     return;
   }
@@ -449,6 +587,31 @@ function renderPagination(current, total) {
   `;
 
   container.innerHTML = buttons;
+}
+
+/**
+ * Render quota summary item
+ */
+function renderQuotaSummaryItem(name, quota) {
+  const percentage = quota.remainingPercentage ?? 0;
+  const status = getStatus(percentage);
+  const resetTimeFormatted = formatTimeUntilReset(quota.resetTime);
+  
+  return `
+    <div class="model-item summary-item-card">
+      <div class="model-header">
+        <span class="model-name">${name}</span>
+        <span class="model-badge badge-${status.class}">${i18n(status.text.toLowerCase())}</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-bar progress-${status.class}" style="width: ${Math.max(0, Math.min(100, percentage))}%"></div>
+      </div>
+      <div class="model-meta">
+        <span>${percentage.toFixed(1)}% ${i18n('remaining')}</span>
+        <span>${i18n('resetTime')}: ${resetTimeFormatted}</span>
+      </div>
+    </div>
+  `;
 }
 
 /**
@@ -877,6 +1040,32 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * Toggle models visibility
+ */
+function toggleModels(index) {
+  const modelsDiv = document.getElementById(`models-${index}`);
+  const toggleText = document.getElementById(`toggle-text-${index}`);
+  const toggleBtn = document.querySelector(`button[onclick="toggleModels(${index})"]`);
+  const isHidden = modelsDiv.classList.contains('collapsed');
+  
+  // Get model count from current text
+  const countMatch = toggleText.textContent.match(/\((\d+)\)/);
+  const count = countMatch ? countMatch[1] : '';
+
+  if (isHidden) {
+    modelsDiv.classList.remove('collapsed');
+    toggleBtn.classList.add('active');
+    toggleText.textContent = `${i18n('hideModels')} (${count})`;
+    expandedAccounts.add(index);
+  } else {
+    modelsDiv.classList.add('collapsed');
+    toggleBtn.classList.remove('active');
+    toggleText.textContent = `${i18n('showModels')} (${count})`;
+    expandedAccounts.delete(index);
+  }
 }
 
 /**
