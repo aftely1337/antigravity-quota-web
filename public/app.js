@@ -280,11 +280,20 @@ function getAccountClaudeQuota(models) {
  * Get account's Gemini quota (unified logic for both global summary and account card)
  */
 function getAccountGeminiQuota(models) {
-  const geminiModel = models.find(m =>
-    m.modelId.toLowerCase().includes('gemini-3-pro') && m.quotaInfo
-  ) || models.find(m =>
-    m.modelId.toLowerCase().includes('gemini') && m.quotaInfo
-  );
+  // Prioritize Gemini 3 Pro (High), then (Low), exclude Image variant
+  const geminiModel = models.find(m => {
+    const name = m.name?.toLowerCase() || '';
+    return name.includes('gemini 3 pro') && name.includes('high') && m.quotaInfo;
+  }) || models.find(m => {
+    const name = m.name?.toLowerCase() || '';
+    return name.includes('gemini 3 pro') && name.includes('low') && m.quotaInfo;
+  }) || models.find(m => {
+    const name = m.name?.toLowerCase() || '';
+    const modelId = m.modelId?.toLowerCase() || '';
+    const isGemini3Pro = name.includes('gemini 3 pro') || modelId.includes('gemini-3-pro') || modelId.includes('gemini_3_pro');
+    const isImage = name.includes('image') || modelId.includes('image');
+    return isGemini3Pro && !isImage && m.quotaInfo;
+  });
   return geminiModel?.quotaInfo || null;
 }
 

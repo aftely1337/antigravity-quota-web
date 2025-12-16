@@ -354,10 +354,11 @@ input:checked + .toggle-slider:before {
   background: var(--bg-secondary);
   border-radius: 12px;
   border: 1px solid var(--border-color);
-  overflow: hidden;
   transition: transform 0.2s, box-shadow 0.2s;
   display: flex;
   flex-direction: column;
+  position: relative; /* Ensure z-index works */
+  overflow: visible; /* Allow dropdown to overflow */
 }
 
 .account-card:hover {
@@ -373,6 +374,8 @@ input:checked + .toggle-slider:before {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
 }
 
 .account-info {
@@ -413,55 +416,21 @@ input:checked + .toggle-slider:before {
 }
 
 .quota-summary {
-  padding: 12px 16px;
-  display: flex;
-  gap: 16px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 12px 12px 0 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
 }
 
-.summary-item {
-  flex: 1;
+.summary-item-card {
+  border-color: var(--accent-primary);
+  background: rgba(59, 130, 246, 0.05); /* Very subtle tint to distinguish from normal cards */
 }
 
-.summary-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-  font-size: 0.8rem;
+.summary-item-card .model-name {
+  font-weight: 600; /* Slightly bolder */
+  font-size: 0.85rem;
 }
-
-.summary-name {
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.summary-value {
-  font-weight: 600;
-}
-
-.summary-value.healthy { color: var(--success-color); }
-.summary-value.warning { color: var(--warning-color); }
-.summary-value.critical { color: var(--error-color); }
-.summary-value.exhausted { color: var(--text-tertiary); }
-
-.summary-track {
-  height: 4px;
-  background: var(--bg-tertiary);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.summary-bar {
-  height: 100%;
-  border-radius: 2px;
-  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.summary-bar.healthy { background: var(--success-color); }
-.summary-bar.warning { background: var(--warning-color); }
-.summary-bar.critical { background: var(--error-color); }
-.summary-bar.exhausted { background: var(--text-tertiary); }
 
 .account-models {
   padding: 12px;
