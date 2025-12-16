@@ -32,6 +32,14 @@
           <span class="toggle-label" data-i18n="autoRefresh">Auto Refresh</span>
         </label>
 
+        <select id="refreshIntervalSelect" class="refresh-interval-select" onchange="changeRefreshInterval()">
+          <option value="30000">30s</option>
+          <option value="60000" selected>1m</option>
+          <option value="120000">2m</option>
+          <option value="300000">5m</option>
+          <option value="600000">10m</option>
+        </select>
+
         <button id="refreshBtn" class="btn btn-primary" onclick="refreshAll()" data-i18n="refreshAll">
           刷新全部
         </button>

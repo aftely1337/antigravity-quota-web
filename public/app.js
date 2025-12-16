@@ -4,6 +4,7 @@
 
 // State
 let autoRefreshInterval = null;
+let refreshIntervalMs = 60000; // Default 60 seconds
 let quotaData = [];
 let currentPage = 1;
 let itemsPerPage = 12;
@@ -53,8 +54,9 @@ const translations = {
     healthy: 'Healthy',
     deleting: 'Deleting...',
     refreshing: 'Refreshing...',
-    autoRefreshEnabled: 'Auto refresh enabled (60s)',
+    autoRefreshEnabled: 'Auto refresh enabled ({interval})',
     autoRefreshDisabled: 'Auto refresh disabled',
+    intervalChanged: 'Refresh interval changed to {interval}',
     accountRefreshed: 'Account refreshed successfully',
     accountDeleted: 'Account deleted successfully',
     imported: 'Imported',
@@ -116,8 +118,9 @@ const translations = {
     healthy: '健康',
     deleting: '删除中...',
     refreshing: '刷新中...',
-    autoRefreshEnabled: '自动刷新已启用 (60秒)',
+    autoRefreshEnabled: '自动刷新已启用 ({interval})',
     autoRefreshDisabled: '自动刷新已禁用',
+    intervalChanged: '刷新间隔已更改为 {interval}',
     accountRefreshed: '账号刷新成功',
     accountDeleted: '账号删除成功',
     imported: '已导入',
@@ -192,6 +195,16 @@ function i18n(key) {
  * Restore auto refresh state from localStorage
  */
 function restoreAutoRefreshState() {
+  // Restore interval setting
+  const savedInterval = localStorage.getItem('autoRefreshInterval');
+  if (savedInterval) {
+    refreshIntervalMs = parseInt(savedInterval, 10);
+    const select = document.getElementById('refreshIntervalSelect');
+    if (select) {
+      select.value = savedInterval;
+    }
+  }
+  
   const saved = localStorage.getItem('autoRefreshEnabled');
   if (saved === 'true') {
     const checkbox = document.getElementById('autoRefreshCheck');
@@ -200,7 +213,7 @@ function restoreAutoRefreshState() {
       // Start the auto refresh interval
       autoRefreshInterval = setInterval(() => {
         loadQuotaData();
-      }, 60000); // 60 seconds
+      }, refreshIntervalMs);
     }
   }
 }
@@ -849,9 +862,9 @@ function toggleAutoRefresh() {
   if (checkbox.checked) {
     autoRefreshInterval = setInterval(() => {
       loadQuotaData();
-    }, 60000); // 60 seconds
+    }, refreshIntervalMs);
     localStorage.setItem('autoRefreshEnabled', 'true');
-    showToast(i18n('autoRefreshEnabled'), 'success');
+    showToast(i18n('autoRefreshEnabled').replace('{interval}', formatInterval(refreshIntervalMs)), 'success');
   } else {
     if (autoRefreshInterval) {
       clearInterval(autoRefreshInterval);
@@ -860,6 +873,33 @@ function toggleAutoRefresh() {
     localStorage.setItem('autoRefreshEnabled', 'false');
     showToast(i18n('autoRefreshDisabled'), 'info');
   }
+}
+
+/**
+ * Change refresh interval
+ */
+function changeRefreshInterval() {
+  const select = document.getElementById('refreshIntervalSelect');
+  refreshIntervalMs = parseInt(select.value, 10);
+  localStorage.setItem('autoRefreshInterval', select.value);
+  
+  // If auto refresh is enabled, restart with new interval
+  const checkbox = document.getElementById('autoRefreshCheck');
+  if (checkbox.checked && autoRefreshInterval) {
+    clearInterval(autoRefreshInterval);
+    autoRefreshInterval = setInterval(() => {
+      loadQuotaData();
+    }, refreshIntervalMs);
+    showToast(i18n('intervalChanged').replace('{interval}', formatInterval(refreshIntervalMs)), 'success');
+  }
+}
+
+/**
+ * Format interval for display
+ */
+function formatInterval(ms) {
+  if (ms < 60000) return `${ms / 1000}s`;
+  return `${ms / 60000}m`;
 }
 
 /**
