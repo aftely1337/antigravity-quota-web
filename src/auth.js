@@ -1,6 +1,6 @@
 /**
  * Antigravity 认证和Token刷新模块
- * 支持HTTP代理
+ * 支持HTTP和SOCKS5代理
  */
 
 const https = require('https');
@@ -8,6 +8,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { SocksProxyAgent } = require('socks-proxy-agent');
 
 // Antigravity OAuth配置 (从CLIProxyAPI提取)
 const ANTIGRAVITY_CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
@@ -16,77 +17,116 @@ const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const OAUTH_AUTH_URL = 'https://accounts.google.com/o/oauth2/auth';
 const USER_INFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
 
-// 代理配置 - 从环境变量读取
-const PROXY_URL = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
+// 代理配置 - 优先从配置文件读取，fallback到环境变量
+let proxyConfig = null;
+const PROXY_CONFIG_FILE = path.join(__dirname, '..', 'config', 'proxy.json');
 
 /**
- * 创建代理Agent
+ * 加载代理配置
  */
-function createProxyAgent(targetUrl) {
-  if (!PROXY_URL) {
-    return null;
-  }
-  
+function loadProxyConfig() {
   try {
-    const proxyUrl = new URL(PROXY_URL);
-    const targetUrlObj = new URL(targetUrl);
-    
-    // 使用HTTP CONNECT隧道
-    return {
-      host: proxyUrl.hostname,
-      port: proxyUrl.port || 7890,
-      path: `${targetUrlObj.hostname}:443`,
-      headers: {
-        Host: targetUrlObj.hostname
+    if (fs.existsSync(PROXY_CONFIG_FILE)) {
+      const content = fs.readFileSync(PROXY_CONFIG_FILE, 'utf-8');
+      proxyConfig = JSON.parse(content);
+      if (proxyConfig.enabled && proxyConfig.url) {
+        console.log(`Proxy loaded from config: ${proxyConfig.type || 'http'} ${proxyConfig.url}`);
       }
-    };
+      return proxyConfig;
+    }
   } catch (e) {
-    console.error('Invalid proxy URL:', e.message);
-    return null;
+    console.error('Failed to load proxy config:', e.message);
+  }
+  return null;
+}
+
+/**
+ * 保存代理配置
+ */
+function saveProxyConfig(config) {
+  try {
+    const configDir = path.dirname(PROXY_CONFIG_FILE);
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+    fs.writeFileSync(PROXY_CONFIG_FILE, JSON.stringify(config, null, 2));
+    proxyConfig = config;
+    return true;
+  } catch (e) {
+    console.error('Failed to save proxy config:', e.message);
+    return false;
   }
 }
 
 /**
- * 发起HTTPS请求（支持代理）
+ * 获取当前代理配置
+ */
+function getProxyConfig() {
+  if (!proxyConfig) {
+    loadProxyConfig();
+  }
+  return proxyConfig;
+}
+
+/**
+ * 获取有效的代理URL
+ */
+function getProxyUrl() {
+  const config = getProxyConfig();
+  if (config && config.enabled && config.url) {
+    return config.url;
+  }
+  // Fallback to environment variable
+  return process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
+}
+
+/**
+ * 获取代理类型
+ */
+function getProxyType() {
+  const config = getProxyConfig();
+  if (config && config.enabled && config.type) {
+    return config.type;
+  }
+  const proxyUrl = getProxyUrl();
+  if (proxyUrl) {
+    if (proxyUrl.startsWith('socks5://') || proxyUrl.startsWith('socks://')) {
+      return 'socks5';
+    }
+    if (proxyUrl.startsWith('socks4://')) {
+      return 'socks4';
+    }
+  }
+  return 'http';
+}
+
+// 初始化加载代理配置
+loadProxyConfig();
+
+/**
+ * 发起HTTPS请求（支持HTTP和SOCKS5代理）
  */
 function httpsRequestWithProxy(targetUrl, options, postData) {
   return new Promise((resolve, reject) => {
     const targetUrlObj = new URL(targetUrl);
+    const proxyUrl = getProxyUrl();
+    const proxyType = getProxyType();
     
-    if (PROXY_URL) {
-      // 通过代理发送请求
-      const proxyUrl = new URL(PROXY_URL);
-      console.log(`Using proxy: ${proxyUrl.hostname}:${proxyUrl.port}`);
+    if (proxyUrl) {
+      console.log(`Using ${proxyType} proxy: ${proxyUrl}`);
       
-      // 先建立CONNECT隧道
-      const connectOptions = {
-        hostname: proxyUrl.hostname,
-        port: proxyUrl.port || 7890,
-        method: 'CONNECT',
-        path: `${targetUrlObj.hostname}:443`,
-        headers: {
-          Host: `${targetUrlObj.hostname}:443`
-        }
-      };
-      
-      const connectReq = http.request(connectOptions);
-      
-      connectReq.on('connect', (res, socket) => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`Proxy CONNECT failed: ${res.statusCode}`));
-          return;
-        }
+      if (proxyType === 'socks5' || proxyType === 'socks4') {
+        // SOCKS代理
+        const agent = new SocksProxyAgent(proxyUrl);
         
-        // 通过隧道发送HTTPS请求
-        const httpsOptions = {
+        const reqOptions = {
           ...options,
           hostname: targetUrlObj.hostname,
           path: targetUrlObj.pathname + targetUrlObj.search,
-          socket: socket,
-          agent: false
+          agent: agent
         };
         
-        const req = https.request(httpsOptions, (res) => {
+        const req = https.request(reqOptions, (res) => {
           let data = '';
           res.on('data', (chunk) => { data += chunk; });
           res.on('end', () => {
@@ -95,14 +135,67 @@ function httpsRequestWithProxy(targetUrl, options, postData) {
         });
         
         req.on('error', reject);
+        req.setTimeout(15000, () => {
+          req.destroy();
+          reject(new Error('Request timeout'));
+        });
+        
         if (postData) {
           req.write(postData);
         }
         req.end();
-      });
-      
-      connectReq.on('error', reject);
-      connectReq.end();
+      } else {
+        // HTTP代理 - 使用CONNECT隧道
+        const proxyUrlObj = new URL(proxyUrl);
+        
+        const connectOptions = {
+          hostname: proxyUrlObj.hostname,
+          port: proxyUrlObj.port || 7890,
+          method: 'CONNECT',
+          path: `${targetUrlObj.hostname}:443`,
+          headers: {
+            Host: `${targetUrlObj.hostname}:443`
+          }
+        };
+        
+        const connectReq = http.request(connectOptions);
+        
+        connectReq.on('connect', (res, socket) => {
+          if (res.statusCode !== 200) {
+            reject(new Error(`Proxy CONNECT failed: ${res.statusCode}`));
+            return;
+          }
+          
+          const httpsOptions = {
+            ...options,
+            hostname: targetUrlObj.hostname,
+            path: targetUrlObj.pathname + targetUrlObj.search,
+            socket: socket,
+            agent: false
+          };
+          
+          const req = https.request(httpsOptions, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              resolve({ statusCode: res.statusCode, data });
+            });
+          });
+          
+          req.on('error', reject);
+          if (postData) {
+            req.write(postData);
+          }
+          req.end();
+        });
+        
+        connectReq.on('error', reject);
+        connectReq.setTimeout(15000, () => {
+          connectReq.destroy();
+          reject(new Error('Proxy connection timeout'));
+        });
+        connectReq.end();
+      }
     } else {
       // 直接发送请求
       const reqOptions = {
@@ -369,7 +462,9 @@ module.exports = {
   generateAuthUrl,
   exchangeCodeForToken,
   getUserInfo,
+  getProxyConfig,
+  saveProxyConfig,
+  getProxyUrl,
   ANTIGRAVITY_CLIENT_ID,
-  ANTIGRAVITY_CLIENT_SECRET,
-  PROXY_URL
+  ANTIGRAVITY_CLIENT_SECRET
 };

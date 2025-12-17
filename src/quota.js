@@ -1,9 +1,9 @@
 /**
  * Antigravity 配额查询模块
- * 支持HTTP代理
+ * 支持HTTP和SOCKS5代理
  */
 
-const { httpsRequestWithProxy, PROXY_URL } = require('./auth');
+const { httpsRequestWithProxy, getProxyUrl } = require('./auth');
 
 // Antigravity API配置
 const ANTIGRAVITY_BASE_URLS = [
@@ -42,8 +42,8 @@ async function fetchModelsAndQuota(accessToken) {
     try {
       const url = baseUrl + MODELS_PATH;
       console.log(`Fetching models from: ${url}`);
-      if (PROXY_URL) {
-        console.log(`Using proxy: ${PROXY_URL}`);
+      if (getProxyUrl()) {
+        console.log(`Using proxy: ${getProxyUrl()}`);
       }
       
       const response = await httpsRequestWithProxy(url, {

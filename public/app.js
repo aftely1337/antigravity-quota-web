@@ -76,7 +76,18 @@ const translations = {
     activeAccounts: 'Active Accounts',
     average: 'Avg',
     total: 'Total',
-    showing: 'Showing'
+    showing: 'Showing',
+    proxySettings: 'Proxy Settings',
+    proxyEnabled: 'Enable Proxy',
+    proxyType: 'Proxy Type',
+    proxyUrl: 'Proxy URL',
+    proxyPlaceholder: 'e.g. socks5://127.0.0.1:7890',
+    testProxy: 'Test',
+    saveProxy: 'Save',
+    proxySaved: 'Proxy settings saved',
+    proxyTestSuccess: 'Proxy connection successful',
+    proxyTestFailed: 'Proxy connection failed',
+    cancel: 'Cancel'
   },
   zh: {
     updating: '更新中...',
@@ -140,7 +151,18 @@ const translations = {
     activeAccounts: '活跃账号',
     average: '平均',
     total: '总计',
-    showing: '显示'
+    showing: '显示',
+    proxySettings: '代理设置',
+    proxyEnabled: '启用代理',
+    proxyType: '代理类型',
+    proxyUrl: '代理地址',
+    proxyPlaceholder: '例如 socks5://127.0.0.1:7890',
+    testProxy: '测试',
+    saveProxy: '保存',
+    proxySaved: '代理设置已保存',
+    proxyTestSuccess: '代理连接成功',
+    proxyTestFailed: '代理连接失败',
+    cancel: '取消'
   }
 };
 
@@ -1149,3 +1171,99 @@ window.onclick = function(event) {
     });
   }
 };
+
+/**
+ * Show proxy settings modal
+ */
+async function showProxyModal() {
+  const modal = document.getElementById('proxyModal');
+  modal.style.display = 'block';
+  
+  // Load current proxy settings
+  try {
+    const response = await fetch('/api/proxy');
+    const data = await response.json();
+    
+    if (data.success && data.proxy) {
+      document.getElementById('proxyEnabled').checked = data.proxy.enabled;
+      document.getElementById('proxyType').value = data.proxy.type || 'http';
+      document.getElementById('proxyUrl').value = data.proxy.url || '';
+    }
+  } catch (error) {
+    console.error('Failed to load proxy settings:', error);
+  }
+}
+
+/**
+ * Hide proxy settings modal
+ */
+function hideProxyModal() {
+  document.getElementById('proxyModal').style.display = 'none';
+}
+
+/**
+ * Test proxy connection
+ */
+async function testProxy() {
+  const type = document.getElementById('proxyType').value;
+  const url = document.getElementById('proxyUrl').value.trim();
+  
+  if (!url) {
+    showToast(i18n('proxyPlaceholder'), 'warning');
+    return;
+  }
+  
+  const testBtn = document.querySelector('#proxyModal .btn-secondary');
+  const originalText = testBtn.textContent;
+  testBtn.textContent = '...';
+  testBtn.disabled = true;
+  
+  try {
+    const response = await fetch('/api/proxy/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, url })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      showToast(`${i18n('proxyTestSuccess')} (${data.latency}ms)`, 'success');
+    } else {
+      showToast(`${i18n('proxyTestFailed')}: ${data.error}`, 'error');
+    }
+  } catch (error) {
+    showToast(`${i18n('proxyTestFailed')}: ${error.message}`, 'error');
+  } finally {
+    testBtn.textContent = originalText;
+    testBtn.disabled = false;
+  }
+}
+
+/**
+ * Save proxy settings
+ */
+async function saveProxy() {
+  const enabled = document.getElementById('proxyEnabled').checked;
+  const type = document.getElementById('proxyType').value;
+  const url = document.getElementById('proxyUrl').value.trim();
+  
+  try {
+    const response = await fetch('/api/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled, type, url })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      showToast(i18n('proxySaved'), 'success');
+      hideProxyModal();
+    } else {
+      showToast(data.error, 'error');
+    }
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}

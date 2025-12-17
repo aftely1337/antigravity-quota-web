@@ -158,6 +158,108 @@ app.post('/api/refresh/:email', async (req, res) => {
 });
 
 /**
+ * 获取代理配置
+ */
+app.get('/api/proxy', (req, res) => {
+  try {
+    const config = auth.getProxyConfig();
+    res.json({ 
+      success: true, 
+      proxy: config || { enabled: false, type: 'http', url: '' }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 保存代理配置
+ */
+app.post('/api/proxy', (req, res) => {
+  try {
+    const { enabled, type, url } = req.body;
+    
+    // 验证代理类型
+    if (type && !['http', 'socks5', 'socks4'].includes(type)) {
+      return res.status(400).json({ success: false, error: 'Invalid proxy type' });
+    }
+    
+    // 验证代理URL格式
+    if (enabled && url) {
+      try {
+        new URL(url);
+      } catch (e) {
+        return res.status(400).json({ success: false, error: 'Invalid proxy URL format' });
+      }
+    }
+    
+    const config = {
+      enabled: !!enabled,
+      type: type || 'http',
+      url: url || ''
+    };
+    
+    const result = auth.saveProxyConfig(config);
+    if (result) {
+      res.json({ success: true, proxy: config });
+    } else {
+      res.status(500).json({ success: false, error: 'Failed to save proxy config' });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 测试代理连接
+ */
+app.post('/api/proxy/test', async (req, res) => {
+  try {
+    const { type, url } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ success: false, error: 'Proxy URL is required' });
+    }
+    
+    // 临时保存代理配置用于测试
+    const originalConfig = auth.getProxyConfig();
+    auth.saveProxyConfig({ enabled: true, type: type || 'http', url });
+    
+    try {
+      // 测试连接 Google
+      const testUrl = 'https://www.google.com';
+      const startTime = Date.now();
+      
+      const response = await auth.httpsRequestWithProxy(testUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      
+      const latency = Date.now() - startTime;
+      
+      // 恢复原配置
+      if (originalConfig) {
+        auth.saveProxyConfig(originalConfig);
+      }
+      
+      if (response.statusCode >= 200 && response.statusCode < 400) {
+        res.json({ success: true, latency, message: `Connected in ${latency}ms` });
+      } else {
+        res.json({ success: false, error: `HTTP ${response.statusCode}` });
+      }
+    } catch (testError) {
+      // 恢复原配置
+      if (originalConfig) {
+        auth.saveProxyConfig(originalConfig);
+      }
+      res.json({ success: false, error: testError.message });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * 上传新的auth文件
  */
 app.post('/api/upload', express.text({ type: '*/*' }), (req, res) => {
