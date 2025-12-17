@@ -2,7 +2,10 @@ version: '3.8'
 
 services:
   antigravity-quota-web:
-    build: .
+    # 使用 Docker Hub 镜像
+    image: aftely/antigravity-quota-web:latest
+    # 或者使用本地构建（开发时使用）
+    # build: .
     container_name: antigravity-quota-web
     restart: unless-stopped
     ports:
@@ -11,7 +14,7 @@ services:
       - PORT=3078
       - CONFIG_DIR=/app/config
     volumes:
-      # 挂载配置目录，用于存放 auth JSON 文件
+      # 挂载配置目录，用于存放 auth JSON 文件和代理配置
       - ./config:/app/config
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3078/api/health"]
