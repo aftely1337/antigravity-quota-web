@@ -4,6 +4,10 @@ English | [中文](README.md)
 
 A web panel for real-time monitoring of Antigravity model usage quotas.
 
+## Preview
+
+![Preview](images/preview.png)
+
 ## Features
 
 - 📊 **Real-time Monitoring** - View remaining quota percentages for all models
