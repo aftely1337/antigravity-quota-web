@@ -8,7 +8,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { SocksProxyAgent } = require('socks-proxy-agent');
+const { SocksClient } = require('socks');
 
 // Antigravity OAuth配置 (从CLIProxyAPI提取)
 const ANTIGRAVITY_CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
@@ -69,12 +69,35 @@ function getProxyConfig() {
 }
 
 /**
- * 获取有效的代理URL
+ * 获取有效的代理URL（根据类型自动修正协议前缀）
  */
 function getProxyUrl() {
   const config = getProxyConfig();
   if (config && config.enabled && config.url) {
-    return config.url;
+    let url = config.url.trim();
+    const type = config.type || 'http';
+    
+    // 如果URL没有协议前缀，根据类型添加
+    if (!url.includes('://')) {
+      if (type === 'socks5') {
+        url = `socks5://${url}`;
+      } else if (type === 'socks4') {
+        url = `socks4://${url}`;
+      } else {
+        url = `http://${url}`;
+      }
+    } else {
+      // 如果URL有协议前缀但与选择的类型不匹配，修正它
+      if (type === 'socks5' && !url.startsWith('socks5://') && !url.startsWith('socks://')) {
+        url = url.replace(/^[a-z]+:\/\//, 'socks5://');
+      } else if (type === 'socks4' && !url.startsWith('socks4://')) {
+        url = url.replace(/^[a-z]+:\/\//, 'socks4://');
+      } else if (type === 'http' && !url.startsWith('http://') && !url.startsWith('https://')) {
+        url = url.replace(/^[a-z]+:\/\//, 'http://');
+      }
+    }
+    
+    return url;
   }
   // Fallback to environment variable
   return process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
@@ -107,7 +130,7 @@ loadProxyConfig();
  * 发起HTTPS请求（支持HTTP和SOCKS5代理）
  */
 function httpsRequestWithProxy(targetUrl, options, postData) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const targetUrlObj = new URL(targetUrl);
     const proxyUrl = getProxyUrl();
     const proxyType = getProxyType();
@@ -116,34 +139,62 @@ function httpsRequestWithProxy(targetUrl, options, postData) {
       console.log(`Using ${proxyType} proxy: ${proxyUrl}`);
       
       if (proxyType === 'socks5' || proxyType === 'socks4') {
-        // SOCKS代理
-        const agent = new SocksProxyAgent(proxyUrl);
-        
-        const reqOptions = {
-          ...options,
-          hostname: targetUrlObj.hostname,
-          path: targetUrlObj.pathname + targetUrlObj.search,
-          agent: agent
-        };
-        
-        const req = https.request(reqOptions, (res) => {
-          let data = '';
-          res.on('data', (chunk) => { data += chunk; });
-          res.on('end', () => {
-            resolve({ statusCode: res.statusCode, data });
+        // SOCKS代理 - 使用 socks 库建立连接，然后用 https.request
+        try {
+          const proxyUrlObj = new URL(proxyUrl);
+          
+          // 建立 SOCKS 连接
+          const { socket } = await SocksClient.createConnection({
+            proxy: {
+              host: proxyUrlObj.hostname,
+              port: parseInt(proxyUrlObj.port) || 1080,
+              type: proxyType === 'socks4' ? 4 : 5
+            },
+            command: 'connect',
+            destination: {
+              host: targetUrlObj.hostname,
+              port: 443
+            },
+            timeout: 15000
           });
-        });
-        
-        req.on('error', reject);
-        req.setTimeout(15000, () => {
-          req.destroy();
-          reject(new Error('Request timeout'));
-        });
-        
-        if (postData) {
-          req.write(postData);
+          
+          // 使用 https.request 通过已建立的 socket
+          const httpsOptions = {
+            ...options,
+            hostname: targetUrlObj.hostname,
+            path: targetUrlObj.pathname + targetUrlObj.search,
+            socket: socket,
+            agent: false,
+            servername: targetUrlObj.hostname
+          };
+          
+          const req = https.request(httpsOptions, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              resolve({ statusCode: res.statusCode, data });
+            });
+          });
+          
+          req.on('error', (err) => {
+            socket.destroy();
+            reject(err);
+          });
+          
+          req.setTimeout(15000, () => {
+            req.destroy();
+            socket.destroy();
+            reject(new Error('Request timeout'));
+          });
+          
+          if (postData) {
+            req.write(postData);
+          }
+          req.end();
+          
+        } catch (err) {
+          reject(err);
         }
-        req.end();
       } else {
         // HTTP代理 - 使用CONNECT隧道
         const proxyUrlObj = new URL(proxyUrl);
