@@ -1,15 +1,20 @@
 # Antigravity Quota Web Panel
 
+[English](README_EN.md) | 中文
+
 实时监控 Antigravity 模型使用配额的 Web 面板。
 
 ## 功能特点
 
 - 📊 **实时监控** - 查看所有模型的剩余配额百分比
 - ⏰ **重置时间** - 显示配额重置倒计时
-- 🔄 **自动刷新** - 可选择每60秒自动刷新配额
+- 🔄 **自动刷新** - 可选择刷新间隔（30秒/1分钟/2分钟/5分钟/10分钟）
 - 👥 **多账号支持** - 同时监控多个 Antigravity 账号
 - 🔐 **自动Token刷新** - 自动使用 refresh_token 更新过期的 access_token
 - 📤 **便捷上传** - 通过 Web 界面直接上传 auth JSON 文件
+- 🔗 **兼容 CLIProxyAPI** - 可直接使用 CLIProxyAPI 的 auth 文件，无需转换
+- 🌐 **代理支持** - 支持 HTTP/SOCKS5/SOCKS4 代理，可通过界面配置
+- 🌍 **中英文切换** - 支持中英文界面切换
 - 🐳 **Docker 支持** - 支持 Docker 容器化部署
 
 ## 安装
@@ -103,6 +108,20 @@ docker-compose up -d
 
 打开浏览器访问 http://localhost:3078
 
+### 4. 配置代理（可选）
+
+如果需要通过代理访问 Google API，可以：
+
+1. 点击页面右上角的 ⚙️ 齿轮图标
+2. 启用代理并选择代理类型（HTTP/SOCKS5/SOCKS4）
+3. 输入代理地址，例如：
+   - HTTP 代理：`127.0.0.1:7890`
+   - SOCKS5 代理：`127.0.0.1:7891`
+4. 点击「测试」验证连接
+5. 点击「保存」应用设置
+
+代理配置会保存到 `config/proxy.json`，重启后自动加载。
+
 ## API 接口
 
 | 接口 | 方法 | 说明 |
@@ -112,6 +131,9 @@ docker-compose up -d
 | `/api/quota/:email` | GET | 获取指定账号的配额信息 |
 | `/api/refresh/:email` | POST | 刷新指定账号的 Token |
 | `/api/upload` | POST | 上传新的 auth 文件 |
+| `/api/proxy` | GET | 获取代理配置 |
+| `/api/proxy` | POST | 保存代理配置 |
+| `/api/proxy/test` | POST | 测试代理连接 |
 | `/api/health` | GET | 健康检查 |
 
 ## 配置
@@ -122,6 +144,7 @@ docker-compose up -d
 |------|--------|------|
 | `PORT` | 3078 | 服务器端口 |
 | `CONFIG_DIR` | ./config | auth 文件存放目录 |
+| `HTTPS_PROXY` | - | HTTP(S) 代理地址（备用，优先使用界面配置） |
 
 示例：
 ```bash
@@ -137,8 +160,8 @@ PORT=8080 CONFIG_DIR=/data/auth npm start
 
 | 配置项 | 说明 |
 |--------|------|
-| `ports: "3067:3078"` | 端口映射，可修改为其他端口如 `"8080:3078"` |
-| `volumes: ./config:/app/config` | 配置目录挂载，用于持久化 auth 文件 |
+| `ports: "3078:3078"` | 端口映射，可修改为其他端口如 `"8080:3078"` |
+| `volumes: ./config:/app/config` | 配置目录挂载，用于持久化 auth 文件和代理配置 |
 | `restart: unless-stopped` | 容器异常退出时自动重启 |
 | `healthcheck` | 健康检查，确保服务正常运行 |
 
@@ -153,14 +176,15 @@ antigravity-quota-web/
 ├── .dockerignore         # Docker 构建忽略文件
 ├── src/
 │   ├── index.js          # 主入口/Web服务器
-│   ├── auth.js           # Token 刷新逻辑
+│   ├── auth.js           # Token 刷新和代理逻辑
 │   └── quota.js          # 配额查询逻辑
 ├── public/
 │   ├── index.html        # Web 界面
 │   ├── style.css         # 样式
 │   └── app.js            # 前端脚本
-└── config/               # auth 文件存放目录
-    └── antigravity-*.json
+└── config/               # 配置文件存放目录
+    ├── antigravity-*.json  # auth 文件
+    └── proxy.json          # 代理配置（自动生成）
 ```
 
 ## 状态指示
@@ -179,6 +203,7 @@ antigravity-quota-web/
 2. **Token 安全**: auth 文件包含敏感凭证，请妥善保管
 3. **API 限制**: 请勿频繁刷新，以免触发 Google API 限制
 4. **Docker 权限**: 确保 config 目录对容器有读写权限
+5. **代理配置**: 代理设置保存在 config/proxy.json，会在服务重启后自动加载
 
 ## 许可证
 
