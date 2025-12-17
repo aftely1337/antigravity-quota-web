@@ -284,60 +284,8 @@ async function fetchQuotaViaGenerate(accessToken) {
   return null;
 }
 
-/**
- * 格式化剩余时间
- * @param {string} resetTime - 重置时间ISO字符串
- * @returns {string} 格式化的时间字符串
- */
-function formatTimeUntilReset(resetTime) {
-  if (!resetTime) return 'Unknown';
-  
-  const reset = new Date(resetTime);
-  const now = Date.now();
-  const ms = reset.getTime() - now;
-  
-  if (ms <= 0) return 'Expired';
-  
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  
-  if (days > 0) {
-    return `${days}d ${hours % 24}h`;
-  } else if (hours > 0) {
-    return `${hours}h ${minutes % 60}m`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
-  }
-  return `${seconds}s`;
-}
-
-/**
- * 获取状态指示符
- * @param {number} percentage - 剩余百分比
- * @returns {Object} 状态信息
- */
-function getStatusIndicator(percentage) {
-  if (percentage === undefined || percentage === null) {
-    return { emoji: '⚪', status: 'unknown', color: '#888' };
-  }
-  if (percentage <= 0) {
-    return { emoji: '⚫', status: 'exhausted', color: '#333' };
-  }
-  if (percentage < 30) {
-    return { emoji: '🔴', status: 'critical', color: '#e74c3c' };
-  }
-  if (percentage < 50) {
-    return { emoji: '🟡', status: 'warning', color: '#f39c12' };
-  }
-  return { emoji: '🟢', status: 'healthy', color: '#2ecc71' };
-}
-
 module.exports = {
   fetchModelsAndQuota,
   fetchQuotaViaGenerate,
-  formatTimeUntilReset,
-  getStatusIndicator,
   ANTIGRAVITY_BASE_URLS
 };

@@ -1,170 +1,52 @@
 /**
- * Antigravity Quota Monitor - Frontend Application
+ * Antigravity Quota Monitor - Frontend Application (Modular Version)
  */
 
-// State
-let autoRefreshInterval = null;
-let refreshIntervalMs = 60000; // Default 60 seconds
-let quotaData = [];
-let currentPage = 1;
-let itemsPerPage = 12;
-let searchQuery = '';
-let accountToDelete = null;
-let currentLang = 'zh'; // Default to Chinese
-let expandedAccounts = new Set(); // Track expanded account indices
+import { i18n, updateLanguage, toggleLanguage as toggleLangFn, setCurrentLang } from './modules/i18n.js';
+import { state, saveAutoRefreshState, loadAutoRefreshState, setQuotaData, setSearchQuery, setCurrentPage, toggleExpandedAccount, isAccountExpanded } from './modules/state.js';
+import { fetchQuota, fetchSingleQuota, deleteAccountApi, downloadAccountApi, uploadAuthApi, getProxyConfig, saveProxyConfigApi, testProxyApi } from './modules/api.js';
+import { getStatus, formatTimeUntilReset, formatInterval, escapeHtml, getAccountClaudeQuota, getAccountGeminiQuota } from './modules/utils.js';
+import { showToast, renderQuotaSummaryItem, renderModelCard, renderPagination, renderGlobalSummaryItem } from './modules/ui.js';
 
-const translations = {
-  en: {
-    updating: 'Updating...',
-    autoRefresh: 'Auto Refresh',
-    refreshAll: 'Refresh All',
-    uploadAuth: 'Upload Auth',
-    searchPlaceholder: 'Search accounts...',
-    loading: 'Loading quota data...',
-    importTitle: 'Import Auth Configuration',
-    importDesc: 'Paste the content of your auth JSON file or upload it directly.',
-    selectFile: 'Select JSON file',
-    cancel: 'Cancel',
-    import: 'Import',
-    accountDetails: 'Account Details',
-    deleteTitle: 'Delete Account',
-    deleteConfirm: 'Are you sure you want to delete account',
-    deleteWarning: 'This action cannot be undone. The auth file will be permanently removed.',
-    delete: 'Delete',
-    download: 'Download',
-    retry: 'Retry',
-    view: 'View',
-    refresh: 'Refresh',
-    noResultsTitle: 'No Results Found',
-    noResultsDesc: 'No accounts match your search query',
-    noAccountsTitle: 'No Accounts Found',
-    noAccountsDesc: 'Add an auth JSON file to the config directory or upload one to get started.',
-    importAuthFile: 'Import Auth File',
-    model: 'Model',
-    status: 'Status',
-    quota: 'Quota',
-    resetTime: 'Reset Time',
-    lastUpdated: 'Last updated',
-    remaining: 'Remaining',
-    unknown: 'Unknown',
-    expired: 'Expired',
-    exhausted: 'Exhausted',
-    critical: 'Critical',
-    warning: 'Warning',
-    healthy: 'Healthy',
-    deleting: 'Deleting...',
-    refreshing: 'Refreshing...',
-    autoRefreshEnabled: 'Auto refresh enabled ({interval})',
-    autoRefreshDisabled: 'Auto refresh disabled',
-    intervalChanged: 'Refresh interval changed to {interval}',
-    accountRefreshed: 'Account refreshed successfully',
-    accountDeleted: 'Account deleted successfully',
-    imported: 'Imported',
-    importFailed: 'Import failed',
-    refreshFailed: 'Refresh failed',
-    deleteFailed: 'Delete failed',
-    downloadFailed: 'Download failed',
-    invalidJson: 'Invalid JSON',
-    enterAuthContent: 'Please enter auth content',
-    connectionError: 'Connection Error',
-    tryAgain: 'Try Again',
-    failedToFetch: 'Failed to fetch quota',
-    noModelQuota: 'No model quota information available.',
-    showModels: 'Show Models',
-    hideModels: 'Hide Models',
-    totalQuota: 'Total Quota',
-    activeAccounts: 'Active Accounts',
-    average: 'Avg',
-    total: 'Total',
-    showing: 'Showing',
-    proxySettings: 'Proxy Settings',
-    proxyEnabled: 'Enable Proxy',
-    proxyType: 'Proxy Type',
-    proxyUrl: 'Proxy URL',
-    proxyPlaceholder: 'e.g. socks5://127.0.0.1:7890',
-    testProxy: 'Test',
-    saveProxy: 'Save',
-    proxySaved: 'Proxy settings saved',
-    proxyTestSuccess: 'Proxy connection successful',
-    proxyTestFailed: 'Proxy connection failed',
-    cancel: 'Cancel'
-  },
-  zh: {
-    updating: '更新中...',
-    autoRefresh: '自动刷新',
-    refreshAll: '刷新全部',
-    uploadAuth: '上传 Auth',
-    searchPlaceholder: '搜索账号...',
-    loading: '正在加载配额数据...',
-    importTitle: '导入 Auth 配置',
-    importDesc: '粘贴您的 auth JSON 文件内容或直接上传文件。',
-    selectFile: '选择 JSON 文件',
-    cancel: '取消',
-    import: '导入',
-    accountDetails: '账号详情',
-    deleteTitle: '删除账号',
-    deleteConfirm: '您确定要删除账号',
-    deleteWarning: '此操作无法撤销。Auth 文件将被永久删除。',
-    delete: '删除',
-    download: '下载',
-    retry: '重试',
-    view: '查看',
-    refresh: '刷新',
-    noResultsTitle: '未找到结果',
-    noResultsDesc: '没有账号匹配您的搜索查询',
-    noAccountsTitle: '未找到账号',
-    noAccountsDesc: '请添加 auth JSON 文件到配置目录或上传一个以开始使用。',
-    importAuthFile: '导入 Auth 文件',
-    model: '模型',
-    status: '状态',
-    quota: '配额',
-    resetTime: '重置时间',
-    lastUpdated: '最后更新',
-    remaining: '剩余',
-    unknown: '未知',
-    expired: '已过期',
-    exhausted: '耗尽',
-    critical: '严重',
-    warning: '警告',
-    healthy: '健康',
-    deleting: '删除中...',
-    refreshing: '刷新中...',
-    autoRefreshEnabled: '自动刷新已启用 ({interval})',
-    autoRefreshDisabled: '自动刷新已禁用',
-    intervalChanged: '刷新间隔已更改为 {interval}',
-    accountRefreshed: '账号刷新成功',
-    accountDeleted: '账号删除成功',
-    imported: '已导入',
-    importFailed: '导入失败',
-    refreshFailed: '刷新失败',
-    deleteFailed: '删除失败',
-    downloadFailed: '下载失败',
-    invalidJson: '无效的 JSON',
-    enterAuthContent: '请输入 auth 内容',
-    connectionError: '连接错误',
-    tryAgain: '重试',
-    failedToFetch: '获取配额失败',
-    noModelQuota: '暂无模型配额信息。',
-    showModels: '显示模型',
-    hideModels: '隐藏模型',
-    totalQuota: '总配额',
-    activeAccounts: '活跃账号',
-    average: '平均',
-    total: '总计',
-    showing: '显示',
-    proxySettings: '代理设置',
-    proxyEnabled: '启用代理',
-    proxyType: '代理类型',
-    proxyUrl: '代理地址',
-    proxyPlaceholder: '例如 socks5://127.0.0.1:7890',
-    testProxy: '测试',
-    saveProxy: '保存',
-    proxySaved: '代理设置已保存',
-    proxyTestSuccess: '代理连接成功',
-    proxyTestFailed: '代理连接失败',
-    cancel: '取消'
-  }
+// 挂载到 window 以供 HTML 调用
+window.toggleLanguage = () => {
+  toggleLangFn();
+  renderAccounts();
+  renderGlobalSummary();
 };
+
+window.handleSearch = (query) => {
+  setSearchQuery(query);
+  renderAccounts();
+};
+
+window.changePage = (page) => {
+  setCurrentPage(page);
+  renderAccounts();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+window.loadQuotaData = loadQuotaData;
+window.refreshAll = refreshAll;
+window.refreshAccount = refreshAccount;
+window.deleteAccount = deleteAccount;
+window.confirmDelete = confirmDelete;
+window.hideDeleteModal = hideDeleteModal;
+window.downloadAccount = downloadAccount;
+window.toggleAutoRefresh = toggleAutoRefresh;
+window.changeRefreshInterval = changeRefreshInterval;
+window.showUploadModal = showUploadModal;
+window.hideUploadModal = hideUploadModal;
+window.handleFileSelect = handleFileSelect;
+window.uploadAuth = uploadAuth;
+window.showAccountDetail = showAccountDetail;
+window.hideDetailModal = hideDetailModal;
+window.toggleModels = toggleModels;
+window.toggleDropdown = toggleDropdown;
+window.showProxyModal = showProxyModal;
+window.hideProxyModal = hideProxyModal;
+window.testProxy = testProxy;
+window.saveProxy = saveProxy;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -173,80 +55,26 @@ document.addEventListener('DOMContentLoaded', () => {
   updateLanguage();
 });
 
-/**
- * Toggle language
- */
-function toggleLanguage() {
-  currentLang = currentLang === 'zh' ? 'en' : 'zh';
-  updateLanguage();
-  renderAccounts(); // Re-render to update dynamic content
-  renderGlobalSummary(); // Re-render global summary for language switch
-}
-
-/**
- * Update UI language
- */
-function updateLanguage() {
-  const t = translations[currentLang];
-  
-  // Update elements with data-i18n attribute
-  document.querySelectorAll('[data-i18n]').forEach(el => {
-    const key = el.getAttribute('data-i18n');
-    if (t[key]) {
-      el.textContent = t[key];
-    }
-  });
-
-  // Update placeholders
-  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
-    const key = el.getAttribute('data-i18n-placeholder');
-    if (t[key]) {
-      el.placeholder = t[key];
-    }
-  });
-}
-
-/**
- * Get translation
- */
-function i18n(key) {
-  return translations[currentLang][key] || key;
-}
-
-/**
- * Restore auto refresh state from localStorage
- */
 function restoreAutoRefreshState() {
-  // Restore interval setting
-  const savedInterval = localStorage.getItem('autoRefreshInterval');
-  if (savedInterval) {
-    refreshIntervalMs = parseInt(savedInterval, 10);
-    const select = document.getElementById('refreshIntervalSelect');
-    if (select) {
-      select.value = savedInterval;
-    }
+  const { enabled, interval } = loadAutoRefreshState();
+  
+  const select = document.getElementById('refreshIntervalSelect');
+  if (select) {
+    select.value = interval.toString();
   }
   
-  const saved = localStorage.getItem('autoRefreshEnabled');
-  if (saved === 'true') {
+  if (enabled) {
     const checkbox = document.getElementById('autoRefreshCheck');
     if (checkbox) {
       checkbox.checked = true;
-      // Start the auto refresh interval
-      autoRefreshInterval = setInterval(() => {
-        loadQuotaData();
-      }, refreshIntervalMs);
+      state.autoRefreshInterval = setInterval(() => loadQuotaData(), interval);
     }
   }
 }
 
-/**
- * Load quota data for all accounts
- */
 async function loadQuotaData() {
   const container = document.getElementById('accounts');
   
-  // Only show full loading state if container is empty
   if (!container.children.length || container.querySelector('.loading-state')) {
     container.innerHTML = `
       <div class="loading-state">
@@ -257,14 +85,13 @@ async function loadQuotaData() {
   }
 
   try {
-    const response = await fetch('/api/quota');
-    const data = await response.json();
+    const data = await fetchQuota();
 
     if (!data.success) {
       throw new Error(data.error || i18n('failedToFetch'));
     }
 
-    quotaData = data.results;
+    setQuotaData(data.results);
     renderGlobalSummary();
     renderAccounts();
     updateLastRefreshTime();
@@ -285,78 +112,22 @@ async function loadQuotaData() {
   }
 }
 
-/**
- * Handle search input
- */
-function handleSearch(query) {
-  searchQuery = query.toLowerCase().trim();
-  currentPage = 1; // Reset to first page
-  renderAccounts();
-}
-
-/**
- * Change page
- */
-function changePage(page) {
-  currentPage = page;
-  renderAccounts();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-/**
- * Get account's Claude quota (unified logic for both global summary and account card)
- */
-function getAccountClaudeQuota(models) {
-  const claudeModel = models.find(m => m.modelId.toLowerCase().includes('claude') && m.quotaInfo);
-  return claudeModel?.quotaInfo || null;
-}
-
-/**
- * Get account's Gemini quota (unified logic for both global summary and account card)
- */
-function getAccountGeminiQuota(models) {
-  // Prioritize Gemini 3 Pro (High), then (Low), exclude Image variant
-  const geminiModel = models.find(m => {
-    const name = m.name?.toLowerCase() || '';
-    return name.includes('gemini 3 pro') && name.includes('high') && m.quotaInfo;
-  }) || models.find(m => {
-    const name = m.name?.toLowerCase() || '';
-    return name.includes('gemini 3 pro') && name.includes('low') && m.quotaInfo;
-  }) || models.find(m => {
-    const name = m.name?.toLowerCase() || '';
-    const modelId = m.modelId?.toLowerCase() || '';
-    const isGemini3Pro = name.includes('gemini 3 pro') || modelId.includes('gemini-3-pro') || modelId.includes('gemini_3_pro');
-    const isImage = name.includes('image') || modelId.includes('image');
-    return isGemini3Pro && !isImage && m.quotaInfo;
-  });
-  return geminiModel?.quotaInfo || null;
-}
-
-/**
- * Render global summary cards
- */
 function renderGlobalSummary() {
-  const container = document.querySelector('.shared-quota-card');
+  let container = document.querySelector('.shared-quota-card');
   
-  // Calculate global stats
-  let claudeTotal = 0;
-  let claudeCount = 0;
-  let geminiTotal = 0;
-  let geminiCount = 0;
+  let claudeTotal = 0, claudeCount = 0, geminiTotal = 0, geminiCount = 0;
   
-  quotaData.forEach(account => {
+  state.quotaData.forEach(account => {
     if (!account.success || !account.quota?.models) return;
     
     const models = account.quota.models;
     
-    // Claude - use unified function
     const claudeQuota = getAccountClaudeQuota(models);
     if (claudeQuota) {
       claudeTotal += claudeQuota.remainingPercentage || 0;
       claudeCount++;
     }
     
-    // Gemini - use unified function
     const geminiQuota = getAccountGeminiQuota(models);
     if (geminiQuota) {
       geminiTotal += geminiQuota.remainingPercentage || 0;
@@ -364,22 +135,21 @@ function renderGlobalSummary() {
     }
   });
 
-  // If no container exists, create it before the accounts grid
   if (!container) {
     const main = document.getElementById('accounts');
     const summarySection = document.createElement('div');
     summarySection.className = 'shared-quota-card';
     main.parentNode.insertBefore(summarySection, main);
+    container = summarySection;
   }
   
-  const summaryContainer = document.querySelector('.shared-quota-card');
   if (claudeCount === 0 && geminiCount === 0) {
-    summaryContainer.style.display = 'none';
+    container.style.display = 'none';
     return;
   }
   
-  summaryContainer.style.display = 'block';
-  summaryContainer.innerHTML = `
+  container.style.display = 'block';
+  container.innerHTML = `
     <div class="shared-quota-title">
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 24px; height: 24px;">
         <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
@@ -393,61 +163,30 @@ function renderGlobalSummary() {
   `;
 }
 
-function renderGlobalSummaryItem(name, totalPercentage, count) {
-  if (count === 0) return '';
-  
-  // Calculate average percentage
-  const avgPercentage = totalPercentage / count;
-  const status = getStatus(avgPercentage);
-  
-  return `
-    <div class="shared-quota-item">
-      <div class="shared-quota-header">
-        <span class="shared-quota-name">${name}</span>
-        <span class="model-badge badge-${status.class}">${i18n(status.text.toLowerCase())}</span>
-      </div>
-      <div class="progress-track">
-        <div class="progress-bar progress-${status.class}" style="width: ${Math.max(0, Math.min(100, avgPercentage))}%"></div>
-      </div>
-      <div class="model-meta">
-        <span>${i18n('activeAccounts')}: ${count}</span>
-        <span>${i18n('average')}: ${avgPercentage.toFixed(1)}%</span>
-      </div>
-    </div>
-  `;
-}
-
-/**
- * Render accounts and their quota
- */
 function renderAccounts() {
   const container = document.getElementById('accounts');
   const statsContainer = document.getElementById('accountStats');
   
-  // Filter data based on search query
-  let filteredData = quotaData;
-  if (searchQuery) {
-    filteredData = quotaData.filter(account =>
-      account.email.toLowerCase().includes(searchQuery)
+  let filteredData = state.quotaData;
+  if (state.searchQuery) {
+    filteredData = state.quotaData.filter(account =>
+      account.email.toLowerCase().includes(state.searchQuery)
     );
   }
 
-  // Calculate pagination
   const totalItems = filteredData.length;
-  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  const totalPages = Math.ceil(totalItems / state.itemsPerPage);
   
-  // Update stats
   if (statsContainer) {
-    statsContainer.textContent = `${i18n('total')}: ${quotaData.length} | ${i18n('showing')}: ${totalItems}`;
+    statsContainer.textContent = `${i18n('total')}: ${state.quotaData.length} | ${i18n('showing')}: ${totalItems}`;
   }
 
-  // Handle empty state
   if (totalItems === 0) {
-    if (searchQuery) {
+    if (state.searchQuery) {
       container.innerHTML = `
         <div class="empty-state">
           <h3>${i18n('noResultsTitle')}</h3>
-          <p>${i18n('noResultsDesc')} "${escapeHtml(searchQuery)}"</p>
+          <p>${i18n('noResultsDesc')} "${escapeHtml(state.searchQuery)}"</p>
         </div>
       `;
     } else {
@@ -459,19 +198,16 @@ function renderAccounts() {
         </div>
       `;
     }
-    renderPagination(0, 0);
+    renderPagination(0, 0, window.changePage);
     return;
   }
 
-  // Slice data for current page
-  const start = (currentPage - 1) * itemsPerPage;
-  const end = start + itemsPerPage;
+  const start = (state.currentPage - 1) * state.itemsPerPage;
+  const end = start + state.itemsPerPage;
   const pageData = filteredData.slice(start, end);
 
-  // Render cards
   container.innerHTML = pageData.map((account) => {
-    // Find original index in quotaData for detail view reference
-    const originalIndex = quotaData.findIndex(a => a.email === account.email);
+    const originalIndex = state.quotaData.findIndex(a => a.email === account.email);
 
     if (!account.success) {
       return `
@@ -494,18 +230,14 @@ function renderAccounts() {
     }
 
     const models = account.quota?.models || [];
-    
-    // Sort models by name/ID alphabetically
     models.sort((a, b) => {
-        const nameA = (a.name || a.modelId || '').toLowerCase();
-        const nameB = (b.name || b.modelId || '').toLowerCase();
-        return nameA.localeCompare(nameB);
+      const nameA = (a.name || a.modelId || '').toLowerCase();
+      const nameB = (b.name || b.modelId || '').toLowerCase();
+      return nameA.localeCompare(nameB);
     });
 
     const initials = account.email.substring(0, 2).toUpperCase();
-    const isExpanded = expandedAccounts.has(originalIndex);
-
-    // Calculate shared quotas - use unified functions
+    const isExpanded = isAccountExpanded(originalIndex);
     const claudeQuota = getAccountClaudeQuota(models);
     const geminiQuota = getAccountGeminiQuota(models);
     
@@ -573,201 +305,20 @@ function renderAccounts() {
     `;
   }).join('');
 
-  renderPagination(currentPage, totalPages);
+  renderPagination(state.currentPage, totalPages, window.changePage);
 }
 
-/**
- * Render pagination controls
- */
-function renderPagination(current, total) {
-  const container = document.getElementById('pagination');
-  if (!container) return;
-
-  if (total < 1) {
-    container.innerHTML = '';
-    return;
-  }
-
-  let buttons = '';
-  
-  // Previous button
-  buttons += `
-    <button class="page-btn" onclick="changePage(${current - 1})" ${current === 1 ? 'disabled' : ''}>
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 20px; height: 20px;">
-        <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
-      </svg>
-    </button>
-  `;
-
-  // Page numbers
-  // Simple logic: show all if <= 7, otherwise show start, end, and around current
-  if (total <= 7) {
-    for (let i = 1; i <= total; i++) {
-      buttons += `<button class="page-btn ${i === current ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
-    }
-  } else {
-    // Logic for many pages can be added here if needed, keeping it simple for now
-    // Showing current, +/- 1, first, last
-    const showPages = new Set([1, total, current, current - 1, current + 1]);
-    const sorted = Array.from(showPages).filter(p => p >= 1 && p <= total).sort((a, b) => a - b);
-    
-    let prev = 0;
-    for (const p of sorted) {
-      if (prev > 0 && p - prev > 1) {
-        buttons += `<span style="color: var(--text-tertiary);">...</span>`;
-      }
-      buttons += `<button class="page-btn ${p === current ? 'active' : ''}" onclick="changePage(${p})">${p}</button>`;
-      prev = p;
-    }
-  }
-
-  // Next button
-  buttons += `
-    <button class="page-btn" onclick="changePage(${current + 1})" ${current === total ? 'disabled' : ''}>
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 20px; height: 20px;">
-        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-      </svg>
-    </button>
-  `;
-
-  container.innerHTML = buttons;
-}
-
-/**
- * Render quota summary item
- */
-function renderQuotaSummaryItem(name, quota) {
-  const percentage = quota.remainingPercentage ?? 0;
-  const status = getStatus(percentage);
-  const resetTimeFormatted = formatTimeUntilReset(quota.resetTime);
-  
-  return `
-    <div class="model-item summary-item-card">
-      <div class="model-header">
-        <span class="model-name">${name}</span>
-        <span class="model-badge badge-${status.class}">${i18n(status.text.toLowerCase())}</span>
-      </div>
-      <div class="progress-track">
-        <div class="progress-bar progress-${status.class}" style="width: ${Math.max(0, Math.min(100, percentage))}%"></div>
-      </div>
-      <div class="model-meta">
-        <span>${percentage.toFixed(1)}% ${i18n('remaining')}</span>
-        <span>${i18n('resetTime')}: ${resetTimeFormatted}</span>
-      </div>
-    </div>
-  `;
-}
-
-/**
- * Render a single model card
- */
-function renderModelCard(model) {
-  const quota = model.quotaInfo;
-  
-  if (!quota) {
-    return `
-      <div class="model-item">
-        <div class="model-header">
-          <span class="model-name">${escapeHtml(model.name || model.modelId)}</span>
-          <span class="model-badge badge-exhausted">${i18n('unknown')}</span>
-        </div>
-        <div class="progress-track">
-          <div class="progress-bar progress-exhausted" style="width: 100%"></div>
-        </div>
-        <div class="model-meta">
-          <span>${i18n('quota')}: ${i18n('unknown')}</span>
-          <span>${i18n('resetTime')}: -</span>
-        </div>
-      </div>
-    `;
-  }
-
-  const percentage = quota.remainingPercentage ?? 0;
-  const status = getStatus(percentage);
-  const resetTimeFormatted = formatTimeUntilReset(quota.resetTime);
-
-  return `
-    <div class="model-item">
-      <div class="model-header">
-        <span class="model-name">${escapeHtml(model.name || model.modelId)}</span>
-        <span class="model-badge badge-${status.class}">${i18n(status.text.toLowerCase())}</span>
-      </div>
-      <div class="progress-track">
-        <div class="progress-bar progress-${status.class}" style="width: ${Math.max(0, Math.min(100, percentage))}%"></div>
-      </div>
-      <div class="model-meta">
-        <span>${percentage.toFixed(1)}% ${i18n('remaining')}</span>
-        <span>${i18n('resetTime')}: ${resetTimeFormatted}</span>
-      </div>
-    </div>
-  `;
-}
-
-/**
- * Get status based on percentage
- */
-function getStatus(percentage) {
-  if (percentage === undefined || percentage === null) {
-    return { class: 'exhausted', text: 'Unknown' };
-  }
-  if (percentage <= 0) {
-    return { class: 'exhausted', text: 'Exhausted' };
-  }
-  if (percentage < 30) {
-    return { class: 'critical', text: 'Critical' };
-  }
-  if (percentage < 50) {
-    return { class: 'warning', text: 'Warning' };
-  }
-  return { class: 'healthy', text: 'Healthy' };
-}
-
-/**
- * Format time until reset
- */
-function formatTimeUntilReset(resetTime) {
-  if (!resetTime) return i18n('unknown');
-
-  const reset = new Date(resetTime);
-  const now = Date.now();
-  const ms = reset.getTime() - now;
-
-  if (ms <= 0) return i18n('expired');
-
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (days > 0) {
-    return `${days}d ${hours % 24}h`;
-  } else if (hours > 0) {
-    return `${hours}h ${minutes % 60}m`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
-  }
-  return `${seconds}s`;
-}
-
-/**
- * Refresh all accounts
- */
 async function refreshAll() {
   const btn = document.getElementById('refreshBtn');
   btn.disabled = true;
   btn.textContent = i18n('refreshing');
-
   await loadQuotaData();
 }
 
-/**
- * Refresh a single account
- */
 async function refreshAccount(email) {
   try {
     showToast(`Refreshing ${email}...`, 'info');
-    const response = await fetch(`/api/quota/${encodeURIComponent(email)}`);
-    const data = await response.json();
+    const data = await fetchSingleQuota(email);
 
     if (data.success) {
       showToast(i18n('accountRefreshed'), 'success');
@@ -780,34 +331,24 @@ async function refreshAccount(email) {
   }
 }
 
-/**
- * Show delete confirmation modal
- */
 function deleteAccount(email) {
-  accountToDelete = email;
+  state.accountToDelete = email;
   document.getElementById('deleteAccountEmail').textContent = email;
   document.getElementById('deleteModal').style.display = 'block';
   
-  // Set up confirm button
   const confirmBtn = document.getElementById('confirmDeleteBtn');
   confirmBtn.onclick = confirmDelete;
 }
 
-/**
- * Hide delete modal
- */
 function hideDeleteModal() {
   document.getElementById('deleteModal').style.display = 'none';
-  accountToDelete = null;
+  state.accountToDelete = null;
 }
 
-/**
- * Execute account deletion
- */
 async function confirmDelete() {
-  if (!accountToDelete) return;
+  if (!state.accountToDelete) return;
 
-  const email = accountToDelete;
+  const email = state.accountToDelete;
   const btn = document.getElementById('confirmDeleteBtn');
   const originalText = btn.textContent;
   
@@ -815,15 +356,11 @@ async function confirmDelete() {
   btn.textContent = i18n('deleting');
 
   try {
-    const response = await fetch(`/api/accounts/${encodeURIComponent(email)}`, {
-      method: 'DELETE'
-    });
-    const data = await response.json();
+    const data = await deleteAccountApi(email);
 
     if (data.success) {
       showToast(i18n('accountDeleted'), 'success');
-      // Remove from local data and re-render
-      quotaData = quotaData.filter(a => a.email !== email);
+      setQuotaData(state.quotaData.filter(a => a.email !== email));
       renderAccounts();
       hideDeleteModal();
     } else {
@@ -837,12 +374,9 @@ async function confirmDelete() {
   }
 }
 
-/**
- * Download account auth file
- */
 async function downloadAccount(email) {
   try {
-    const response = await fetch(`/api/accounts/${encodeURIComponent(email)}/download`);
+    const response = await downloadAccountApi(email);
     
     if (response.ok) {
       const blob = await response.blob();
@@ -850,7 +384,6 @@ async function downloadAccount(email) {
       const a = document.createElement('a');
       a.href = url;
       
-      // Get filename from Content-Disposition header if available, otherwise construct it
       const contentDisposition = response.headers.get('Content-Disposition');
       let fileName = `antigravity-${email.replace(/[^a-zA-Z0-9@._-]/g, '_')}.json`;
       
@@ -875,82 +408,51 @@ async function downloadAccount(email) {
   }
 }
 
-/**
- * Toggle auto refresh
- */
 function toggleAutoRefresh() {
   const checkbox = document.getElementById('autoRefreshCheck');
   
   if (checkbox.checked) {
-    autoRefreshInterval = setInterval(() => {
-      loadQuotaData();
-    }, refreshIntervalMs);
-    localStorage.setItem('autoRefreshEnabled', 'true');
-    showToast(i18n('autoRefreshEnabled').replace('{interval}', formatInterval(refreshIntervalMs)), 'success');
+    state.autoRefreshInterval = setInterval(() => loadQuotaData(), state.refreshIntervalMs);
+    saveAutoRefreshState(true, state.refreshIntervalMs);
+    showToast(i18n('autoRefreshEnabled').replace('{interval}', formatInterval(state.refreshIntervalMs)), 'success');
   } else {
-    if (autoRefreshInterval) {
-      clearInterval(autoRefreshInterval);
-      autoRefreshInterval = null;
+    if (state.autoRefreshInterval) {
+      clearInterval(state.autoRefreshInterval);
+      state.autoRefreshInterval = null;
     }
-    localStorage.setItem('autoRefreshEnabled', 'false');
+    saveAutoRefreshState(false);
     showToast(i18n('autoRefreshDisabled'), 'info');
   }
 }
 
-/**
- * Change refresh interval
- */
 function changeRefreshInterval() {
   const select = document.getElementById('refreshIntervalSelect');
-  refreshIntervalMs = parseInt(select.value, 10);
-  localStorage.setItem('autoRefreshInterval', select.value);
+  state.refreshIntervalMs = parseInt(select.value, 10);
+  saveAutoRefreshState(document.getElementById('autoRefreshCheck').checked, state.refreshIntervalMs);
   
-  // If auto refresh is enabled, restart with new interval
   const checkbox = document.getElementById('autoRefreshCheck');
-  if (checkbox.checked && autoRefreshInterval) {
-    clearInterval(autoRefreshInterval);
-    autoRefreshInterval = setInterval(() => {
-      loadQuotaData();
-    }, refreshIntervalMs);
-    showToast(i18n('intervalChanged').replace('{interval}', formatInterval(refreshIntervalMs)), 'success');
+  if (checkbox.checked && state.autoRefreshInterval) {
+    clearInterval(state.autoRefreshInterval);
+    state.autoRefreshInterval = setInterval(() => loadQuotaData(), state.refreshIntervalMs);
+    showToast(i18n('intervalChanged').replace('{interval}', formatInterval(state.refreshIntervalMs)), 'success');
   }
 }
 
-/**
- * Format interval for display
- */
-function formatInterval(ms) {
-  if (ms < 60000) return `${ms / 1000}s`;
-  return `${ms / 60000}m`;
-}
-
-/**
- * Update last refresh time display
- */
 function updateLastRefreshTime() {
   const element = document.getElementById('lastUpdate');
   const now = new Date();
   element.textContent = `Updated: ${now.toLocaleTimeString()}`;
 }
 
-/**
- * Show upload modal
- */
 function showUploadModal() {
   document.getElementById('uploadModal').style.display = 'block';
   document.getElementById('authContent').value = '';
 }
 
-/**
- * Hide upload modal
- */
 function hideUploadModal() {
   document.getElementById('uploadModal').style.display = 'none';
 }
 
-/**
- * Handle file selection
- */
 function handleFileSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -962,9 +464,6 @@ function handleFileSelect(event) {
   reader.readAsText(file);
 }
 
-/**
- * Upload auth file
- */
 async function uploadAuth() {
   const content = document.getElementById('authContent').value.trim();
   
@@ -974,18 +473,9 @@ async function uploadAuth() {
   }
 
   try {
-    // Validate JSON
     JSON.parse(content);
 
-    const response = await fetch('/api/upload', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain'
-      },
-      body: content
-    });
-
-    const data = await response.json();
+    const data = await uploadAuthApi(content);
 
     if (data.success) {
       showToast(`${i18n('imported')}: ${data.fileName}`, 'success');
@@ -999,11 +489,8 @@ async function uploadAuth() {
   }
 }
 
-/**
- * Show account detail modal
- */
 function showAccountDetail(index) {
-  const account = quotaData[index];
+  const account = state.quotaData[index];
   if (!account) return;
 
   const modal = document.getElementById('detailModal');
@@ -1017,11 +504,10 @@ function showAccountDetail(index) {
   } else {
     const models = account.quota?.models || [];
     
-    // Sort models by name/ID alphabetically for detail view as well
     models.sort((a, b) => {
-        const nameA = (a.name || a.modelId || '').toLowerCase();
-        const nameB = (b.name || b.modelId || '').toLowerCase();
-        return nameA.localeCompare(nameB);
+      const nameA = (a.name || a.modelId || '').toLowerCase();
+      const nameB = (b.name || b.modelId || '').toLowerCase();
+      return nameA.localeCompare(nameB);
     });
 
     const timestamp = account.quota?.timestamp ? new Date(account.quota.timestamp).toLocaleString() : i18n('unknown');
@@ -1067,85 +553,34 @@ function showAccountDetail(index) {
   modal.style.display = 'block';
 }
 
-/**
- * Hide detail modal
- */
 function hideDetailModal() {
   document.getElementById('detailModal').style.display = 'none';
 }
 
-/**
- * Show toast notification
- */
-function showToast(message, type = 'info') {
-  const existingToast = document.querySelector('.toast');
-  if (existingToast) existingToast.remove();
-
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  
-  let icon = '';
-  if (type === 'success') {
-    icon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
-  } else if (type === 'error') {
-    icon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>`;
-  } else {
-    icon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>`;
-  }
-
-  toast.innerHTML = `${icon}<span>${message}</span>`;
-  document.body.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateY(20px)';
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
-}
-
-/**
- * Escape HTML to prevent XSS
- */
-function escapeHtml(text) {
-  if (!text) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-/**
- * Toggle models visibility
- */
 function toggleModels(index) {
   const modelsDiv = document.getElementById(`models-${index}`);
   const toggleText = document.getElementById(`toggle-text-${index}`);
   const toggleBtn = document.querySelector(`button[onclick="toggleModels(${index})"]`);
-  const isHidden = modelsDiv.classList.contains('collapsed');
   
-  // Get model count from current text
   const countMatch = toggleText.textContent.match(/\((\d+)\)/);
   const count = countMatch ? countMatch[1] : '';
 
-  if (isHidden) {
+  const isNowExpanded = toggleExpandedAccount(index);
+  
+  if (isNowExpanded) {
     modelsDiv.classList.remove('collapsed');
     toggleBtn.classList.add('active');
     toggleText.textContent = `${i18n('hideModels')} (${count})`;
-    expandedAccounts.add(index);
   } else {
     modelsDiv.classList.add('collapsed');
     toggleBtn.classList.remove('active');
     toggleText.textContent = `${i18n('showModels')} (${count})`;
-    expandedAccounts.delete(index);
   }
 }
 
-/**
- * Toggle dropdown menu
- */
 function toggleDropdown(event, index) {
   event.stopPropagation();
   
-  // Close all other dropdowns
   document.querySelectorAll('.dropdown-menu').forEach(el => {
     if (el.id !== `dropdown-${index}`) {
       el.classList.remove('show');
@@ -1158,13 +593,11 @@ function toggleDropdown(event, index) {
   }
 }
 
-// Close modals and dropdowns when clicking outside
 window.onclick = function(event) {
   if (event.target.classList.contains('modal-backdrop')) {
     event.target.style.display = 'none';
   }
   
-  // Close dropdowns
   if (!event.target.closest('.account-controls')) {
     document.querySelectorAll('.dropdown-menu').forEach(el => {
       el.classList.remove('show');
@@ -1172,17 +605,12 @@ window.onclick = function(event) {
   }
 };
 
-/**
- * Show proxy settings modal
- */
 async function showProxyModal() {
   const modal = document.getElementById('proxyModal');
   modal.style.display = 'block';
   
-  // Load current proxy settings
   try {
-    const response = await fetch('/api/proxy');
-    const data = await response.json();
+    const data = await getProxyConfig();
     
     if (data.success && data.proxy) {
       document.getElementById('proxyEnabled').checked = data.proxy.enabled;
@@ -1194,16 +622,10 @@ async function showProxyModal() {
   }
 }
 
-/**
- * Hide proxy settings modal
- */
 function hideProxyModal() {
   document.getElementById('proxyModal').style.display = 'none';
 }
 
-/**
- * Test proxy connection
- */
 async function testProxy() {
   const type = document.getElementById('proxyType').value;
   const url = document.getElementById('proxyUrl').value.trim();
@@ -1219,13 +641,7 @@ async function testProxy() {
   testBtn.disabled = true;
   
   try {
-    const response = await fetch('/api/proxy/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, url })
-    });
-    
-    const data = await response.json();
+    const data = await testProxyApi(type, url);
     
     if (data.success) {
       showToast(`${i18n('proxyTestSuccess')} (${data.latency}ms)`, 'success');
@@ -1240,22 +656,13 @@ async function testProxy() {
   }
 }
 
-/**
- * Save proxy settings
- */
 async function saveProxy() {
   const enabled = document.getElementById('proxyEnabled').checked;
   const type = document.getElementById('proxyType').value;
   const url = document.getElementById('proxyUrl').value.trim();
   
   try {
-    const response = await fetch('/api/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled, type, url })
-    });
-    
-    const data = await response.json();
+    const data = await saveProxyConfigApi({ enabled, type, url });
     
     if (data.success) {
       showToast(i18n('proxySaved'), 'success');

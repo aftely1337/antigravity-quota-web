@@ -6,6 +6,7 @@
 const https = require('https');
 const http = require('http');
 const fs = require('fs');
+const fsPromises = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const { SocksClient } = require('socks');
@@ -21,8 +22,33 @@ const USER_INFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
 let proxyConfig = null;
 const PROXY_CONFIG_FILE = path.join(__dirname, '..', 'config', 'proxy.json');
 
+// 账号内存缓存
+let authFilesCache = null;
+let cacheTimestamp = 0;
+const CACHE_TTL = 5000; // 5秒缓存
+
 /**
- * 加载代理配置
+ * 加载代理配置 (异步)
+ */
+async function loadProxyConfigAsync() {
+  try {
+    const exists = await fsPromises.access(PROXY_CONFIG_FILE).then(() => true).catch(() => false);
+    if (exists) {
+      const content = await fsPromises.readFile(PROXY_CONFIG_FILE, 'utf-8');
+      proxyConfig = JSON.parse(content);
+      if (proxyConfig.enabled && proxyConfig.url) {
+        console.log(`Proxy loaded from config: ${proxyConfig.type || 'http'} ${proxyConfig.url}`);
+      }
+      return proxyConfig;
+    }
+  } catch (e) {
+    console.error('Failed to load proxy config:', e.message);
+  }
+  return null;
+}
+
+/**
+ * 加载代理配置 (同步 - 用于启动时)
  */
 function loadProxyConfig() {
   try {
@@ -41,7 +67,23 @@ function loadProxyConfig() {
 }
 
 /**
- * 保存代理配置
+ * 保存代理配置 (异步)
+ */
+async function saveProxyConfigAsync(config) {
+  try {
+    const configDir = path.dirname(PROXY_CONFIG_FILE);
+    await fsPromises.mkdir(configDir, { recursive: true });
+    await fsPromises.writeFile(PROXY_CONFIG_FILE, JSON.stringify(config, null, 2));
+    proxyConfig = config;
+    return true;
+  } catch (e) {
+    console.error('Failed to save proxy config:', e.message);
+    return false;
+  }
+}
+
+/**
+ * 保存代理配置 (同步 - 保持向后兼容)
  */
 function saveProxyConfig(config) {
   try {
@@ -77,7 +119,6 @@ function getProxyUrl() {
     let url = config.url.trim();
     const type = config.type || 'http';
     
-    // 如果URL没有协议前缀，根据类型添加
     if (!url.includes('://')) {
       if (type === 'socks5') {
         url = `socks5://${url}`;
@@ -87,7 +128,6 @@ function getProxyUrl() {
         url = `http://${url}`;
       }
     } else {
-      // 如果URL有协议前缀但与选择的类型不匹配，修正它
       if (type === 'socks5' && !url.startsWith('socks5://') && !url.startsWith('socks://')) {
         url = url.replace(/^[a-z]+:\/\//, 'socks5://');
       } else if (type === 'socks4' && !url.startsWith('socks4://')) {
@@ -99,7 +139,6 @@ function getProxyUrl() {
     
     return url;
   }
-  // Fallback to environment variable
   return process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
 }
 
@@ -139,11 +178,9 @@ function httpsRequestWithProxy(targetUrl, options, postData) {
       console.log(`Using ${proxyType} proxy: ${proxyUrl}`);
       
       if (proxyType === 'socks5' || proxyType === 'socks4') {
-        // SOCKS代理 - 使用 socks 库建立连接，然后用 https.request
         try {
           const proxyUrlObj = new URL(proxyUrl);
           
-          // 建立 SOCKS 连接
           const { socket } = await SocksClient.createConnection({
             proxy: {
               host: proxyUrlObj.hostname,
@@ -158,7 +195,6 @@ function httpsRequestWithProxy(targetUrl, options, postData) {
             timeout: 15000
           });
           
-          // 使用 https.request 通过已建立的 socket
           const httpsOptions = {
             ...options,
             hostname: targetUrlObj.hostname,
@@ -196,7 +232,6 @@ function httpsRequestWithProxy(targetUrl, options, postData) {
           reject(err);
         }
       } else {
-        // HTTP代理 - 使用CONNECT隧道
         const proxyUrlObj = new URL(proxyUrl);
         
         const connectOptions = {
@@ -248,7 +283,6 @@ function httpsRequestWithProxy(targetUrl, options, postData) {
         connectReq.end();
       }
     } else {
-      // 直接发送请求
       const reqOptions = {
         ...options,
         hostname: targetUrlObj.hostname,
@@ -278,9 +312,15 @@ function httpsRequestWithProxy(targetUrl, options, postData) {
 }
 
 /**
- * 读取auth JSON文件
- * @param {string} filePath - auth文件路径
- * @returns {Object} auth数据
+ * 读取auth JSON文件 (异步)
+ */
+async function loadAuthFileAsync(filePath) {
+  const content = await fsPromises.readFile(filePath, 'utf-8');
+  return JSON.parse(content);
+}
+
+/**
+ * 读取auth JSON文件 (同步 - 保持向后兼容)
  */
 function loadAuthFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf-8');
@@ -288,37 +328,47 @@ function loadAuthFile(filePath) {
 }
 
 /**
- * 保存auth JSON文件
- * @param {string} filePath - auth文件路径
- * @param {Object} authData - auth数据
+ * 保存auth JSON文件 (异步)
+ */
+async function saveAuthFileAsync(filePath, authData) {
+  await fsPromises.writeFile(filePath, JSON.stringify(authData, null, 2), 'utf-8');
+  invalidateCache();
+}
+
+/**
+ * 保存auth JSON文件 (同步 - 保持向后兼容)
  */
 function saveAuthFile(filePath, authData) {
   fs.writeFileSync(filePath, JSON.stringify(authData, null, 2), 'utf-8');
+  invalidateCache();
+}
+
+/**
+ * 删除auth文件 (异步)
+ */
+async function deleteAuthFileAsync(filePath) {
+  await fsPromises.unlink(filePath);
+  invalidateCache();
 }
 
 /**
  * 检查token是否过期
- * @param {Object} authData - auth数据
- * @returns {boolean} 是否过期
  */
 function isTokenExpired(authData) {
   if (!authData.expired) {
-    // 使用timestamp + expires_in计算
     if (authData.timestamp && authData.expires_in) {
       const expiryTime = authData.timestamp + (authData.expires_in * 1000);
-      return Date.now() >= expiryTime - 60000; // 提前1分钟刷新
+      return Date.now() >= expiryTime - 60000;
     }
     return true;
   }
   
   const expiryDate = new Date(authData.expired);
-  return Date.now() >= expiryDate.getTime() - 60000; // 提前1分钟刷新
+  return Date.now() >= expiryDate.getTime() - 60000;
 }
 
 /**
  * 刷新access_token
- * @param {Object} authData - auth数据
- * @returns {Promise<Object>} 更新后的auth数据
  */
 async function refreshToken(authData) {
   const postData = new URLSearchParams({
@@ -346,7 +396,6 @@ async function refreshToken(authData) {
   const tokenResp = JSON.parse(response.data);
   const now = Date.now();
   
-  // 更新auth数据
   const updatedAuth = {
     ...authData,
     access_token: tokenResp.access_token,
@@ -355,7 +404,6 @@ async function refreshToken(authData) {
     expired: new Date(now + tokenResp.expires_in * 1000).toISOString()
   };
   
-  // 如果返回了新的refresh_token，也更新它
   if (tokenResp.refresh_token) {
     updatedAuth.refresh_token = tokenResp.refresh_token;
   }
@@ -365,9 +413,6 @@ async function refreshToken(authData) {
 
 /**
  * 确保有有效的access_token
- * @param {Object} authData - auth数据
- * @param {string} filePath - auth文件路径（用于保存刷新后的token）
- * @returns {Promise<Object>} 有效的auth数据
  */
 async function ensureValidToken(authData, filePath) {
   if (!isTokenExpired(authData)) {
@@ -377,9 +422,9 @@ async function ensureValidToken(authData, filePath) {
   console.log(`Token expired for ${authData.email}, refreshing...`);
   const updatedAuth = await refreshToken(authData);
   
-  // 保存刷新后的token
   if (filePath) {
-    saveAuthFile(filePath, updatedAuth);
+    await saveAuthFileAsync(filePath, updatedAuth);
+    invalidateCache();
     console.log(`Token refreshed and saved for ${authData.email}`);
   }
   
@@ -387,9 +432,81 @@ async function ensureValidToken(authData, filePath) {
 }
 
 /**
- * 扫描config目录获取所有auth文件
- * @param {string} configDir - config目录路径
- * @returns {Array<{filePath: string, authData: Object}>} auth文件列表
+ * 使缓存失效
+ */
+function invalidateCache() {
+  authFilesCache = null;
+  cacheTimestamp = 0;
+}
+
+/**
+ * 根据email查找auth文件 (从已扫描的列表中)
+ * @param {Array} authFiles - scanAuthFiles返回的列表
+ * @param {string} email - 要查找的email
+ * @returns {Object|null} 找到的auth文件对象或null
+ */
+function findAuthFileByEmail(authFiles, email) {
+  return authFiles.find(f => 
+    f.authData.email === email || 
+    path.basename(f.filePath, '.json') === email
+  ) || null;
+}
+
+/**
+ * 扫描config目录获取所有auth文件 (异步 + 缓存)
+ */
+async function scanAuthFilesAsync(configDir) {
+  const now = Date.now();
+  if (authFilesCache && (now - cacheTimestamp) < CACHE_TTL) {
+    return authFilesCache;
+  }
+
+  try {
+    await fsPromises.mkdir(configDir, { recursive: true });
+  } catch (e) {
+    // 目录已存在
+  }
+  
+  let files;
+  try {
+    files = await fsPromises.readdir(configDir);
+  } catch (e) {
+    return [];
+  }
+  
+  const authFiles = [];
+  
+  const loadPromises = files
+    .filter(file => file.endsWith('.json') && file.startsWith('antigravity-'))
+    .map(async (file) => {
+      const filePath = path.join(configDir, file);
+      try {
+        const authData = await loadAuthFileAsync(filePath);
+        if (authData.type === 'antigravity' && authData.refresh_token) {
+          return { filePath, authData };
+        }
+      } catch (error) {
+        console.error(`Failed to load auth file ${file}:`, error.message);
+      }
+      return null;
+    });
+  
+  const results = await Promise.all(loadPromises);
+  
+  for (const result of results) {
+    if (result) {
+      authFiles.push(result);
+    }
+  }
+  
+  authFilesCache = authFiles;
+  cacheTimestamp = now;
+  
+  return authFiles;
+}
+
+/**
+ * 扫描config目录获取所有auth文件 (同步 - 保持向后兼容)
  */
 function scanAuthFiles(configDir) {
   if (!fs.existsSync(configDir)) {
@@ -419,8 +536,6 @@ function scanAuthFiles(configDir) {
 
 /**
  * 生成OAuth登录URL
- * @param {string} redirectUri - 回调URL
- * @returns {Object} { url, state }
  */
 function generateAuthUrl(redirectUri) {
   const state = crypto.randomBytes(16).toString('hex');
@@ -450,9 +565,6 @@ function generateAuthUrl(redirectUri) {
 
 /**
  * 使用Authorization Code换取Token
- * @param {string} code - Authorization Code
- * @param {string} redirectUri - 回调URL
- * @returns {Promise<Object>} Token响应
  */
 async function exchangeCodeForToken(code, redirectUri) {
   const postData = new URLSearchParams({
@@ -482,8 +594,6 @@ async function exchangeCodeForToken(code, redirectUri) {
 
 /**
  * 获取用户信息
- * @param {string} accessToken - Access Token
- * @returns {Promise<Object>} 用户信息
  */
 async function getUserInfo(accessToken) {
   const options = {
@@ -504,17 +614,24 @@ async function getUserInfo(accessToken) {
 
 module.exports = {
   loadAuthFile,
+  loadAuthFileAsync,
   saveAuthFile,
+  saveAuthFileAsync,
+  deleteAuthFileAsync,
   isTokenExpired,
   refreshToken,
   ensureValidToken,
   scanAuthFiles,
+  scanAuthFilesAsync,
+  invalidateCache,
+  findAuthFileByEmail,
   httpsRequestWithProxy,
   generateAuthUrl,
   exchangeCodeForToken,
   getUserInfo,
   getProxyConfig,
   saveProxyConfig,
+  saveProxyConfigAsync,
   getProxyUrl,
   ANTIGRAVITY_CLIENT_ID,
   ANTIGRAVITY_CLIENT_SECRET

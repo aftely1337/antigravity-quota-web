@@ -6,6 +6,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const fsPromises = require('fs').promises;
 const auth = require('./auth');
 const quota = require('./quota');
 
@@ -25,352 +26,327 @@ app.use(express.json());
 // 存储账号配额缓存
 const quotaCache = new Map();
 
+// 并发限制
+const CONCURRENCY_LIMIT = 5;
+
+/**
+ * 带限流的并发执行 (改进版)
+ */
+async function runWithConcurrencyLimit(tasks, limit) {
+  const results = [];
+  const executing = new Set();
+  
+  for (const task of tasks) {
+    const p = Promise.resolve().then(() => task());
+    results.push(p);
+    
+    if (limit > 0) {
+      const cleanup = p.finally(() => executing.delete(cleanup));
+      executing.add(cleanup);
+      
+      if (executing.size >= limit) {
+        await Promise.race(executing);
+      }
+    }
+  }
+  
+  return Promise.all(results);
+}
+
+/**
+ * 统一错误处理中间件
+ */
+function asyncHandler(fn) {
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
+/**
+ * 全局错误处理中间件
+ */
+function errorHandler(err, req, res, next) {
+  console.error('Request error:', err.message);
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal server error'
+  });
+}
+
 /**
  * 获取所有账号列表
  */
-app.get('/api/accounts', (req, res) => {
-  try {
-    const authFiles = auth.scanAuthFiles(CONFIG_DIR);
-    const accounts = authFiles.map(({ filePath, authData }) => ({
-      email: authData.email || path.basename(filePath, '.json'),
-      filePath: path.basename(filePath),
-      type: authData.type,
-      expired: authData.expired,
-      isExpired: auth.isTokenExpired(authData)
-    }));
-    res.json({ success: true, accounts });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
+app.get('/api/accounts', asyncHandler(async (req, res) => {
+  const authFiles = await auth.scanAuthFilesAsync(CONFIG_DIR);
+  const accounts = authFiles.map(({ filePath, authData }) => ({
+    email: authData.email || path.basename(filePath, '.json'),
+    filePath: path.basename(filePath),
+    type: authData.type,
+    expired: authData.expired,
+    isExpired: auth.isTokenExpired(authData)
+  }));
+  res.json({ success: true, accounts });
+}));
 
 /**
  * 获取指定账号的配额信息
  */
-app.get('/api/quota/:email', async (req, res) => {
-  try {
-    const email = decodeURIComponent(req.params.email);
-    const authFiles = auth.scanAuthFiles(CONFIG_DIR);
-    
-    const authFile = authFiles.find(f => 
-      f.authData.email === email || 
-      path.basename(f.filePath, '.json') === email
-    );
-    
-    if (!authFile) {
-      return res.status(404).json({ success: false, error: 'Account not found' });
-    }
-    
-    // 确保token有效
-    const validAuth = await auth.ensureValidToken(authFile.authData, authFile.filePath);
-    
-    // 获取配额信息
-    const quotaInfo = await quota.fetchModelsAndQuota(validAuth.access_token);
-    
-    // 缓存结果
-    quotaCache.set(email, {
-      timestamp: new Date().toISOString(),
-      data: quotaInfo
-    });
-    
-    res.json({
-      success: true,
-      email: validAuth.email,
-      quota: quotaInfo
-    });
-  } catch (error) {
-    console.error('Quota fetch error:', error);
-    res.status(500).json({ success: false, error: error.message });
+app.get('/api/quota/:email', asyncHandler(async (req, res) => {
+  const email = decodeURIComponent(req.params.email);
+  const authFiles = await auth.scanAuthFilesAsync(CONFIG_DIR);
+  
+  const authFile = auth.findAuthFileByEmail(authFiles, email);
+  
+  if (!authFile) {
+    return res.status(404).json({ success: false, error: 'Account not found' });
   }
-});
+  
+  const validAuth = await auth.ensureValidToken(authFile.authData, authFile.filePath);
+  const quotaInfo = await quota.fetchModelsAndQuota(validAuth.access_token);
+  
+  const cacheKey = validAuth.email || email;
+  quotaCache.set(cacheKey, {
+    timestamp: new Date().toISOString(),
+    data: quotaInfo
+  });
+  
+  res.json({
+    success: true,
+    email: validAuth.email,
+    quota: quotaInfo
+  });
+}));
 
 /**
- * 获取所有账号的配额信息
+ * 获取所有账号的配额信息 (并发)
  */
-app.get('/api/quota', async (req, res) => {
-  try {
-    const authFiles = auth.scanAuthFiles(CONFIG_DIR);
-    const results = [];
-    
-    for (const { filePath, authData } of authFiles) {
-      try {
-        // 确保token有效
-        const validAuth = await auth.ensureValidToken(authData, filePath);
-        
-        // 获取配额信息
-        const quotaInfo = await quota.fetchModelsAndQuota(validAuth.access_token);
-        
-        results.push({
-          email: validAuth.email || path.basename(filePath, '.json'),
-          success: true,
-          quota: quotaInfo
-        });
-        
-        // 缓存结果
-        quotaCache.set(validAuth.email, {
-          timestamp: new Date().toISOString(),
-          data: quotaInfo
-        });
-      } catch (error) {
-        results.push({
-          email: authData.email || path.basename(filePath, '.json'),
-          success: false,
-          error: error.message
-        });
-      }
+app.get('/api/quota', asyncHandler(async (req, res) => {
+  const authFiles = await auth.scanAuthFilesAsync(CONFIG_DIR);
+  
+  const tasks = authFiles.map(({ filePath, authData }) => async () => {
+    try {
+      const validAuth = await auth.ensureValidToken(authData, filePath);
+      const quotaInfo = await quota.fetchModelsAndQuota(validAuth.access_token);
+      
+      const cacheKey = validAuth.email || path.basename(filePath, '.json');
+      quotaCache.set(cacheKey, {
+        timestamp: new Date().toISOString(),
+        data: quotaInfo
+      });
+      
+      return {
+        email: validAuth.email || path.basename(filePath, '.json'),
+        success: true,
+        quota: quotaInfo
+      };
+    } catch (error) {
+      return {
+        email: authData.email || path.basename(filePath, '.json'),
+        success: false,
+        error: error.message
+      };
     }
-    
-    res.json({ success: true, results });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
+  });
+  
+  const results = await runWithConcurrencyLimit(tasks, CONCURRENCY_LIMIT);
+  res.json({ success: true, results });
+}));
 
 /**
  * 刷新指定账号的token
  */
-app.post('/api/refresh/:email', async (req, res) => {
-  try {
-    const email = decodeURIComponent(req.params.email);
-    const authFiles = auth.scanAuthFiles(CONFIG_DIR);
-    
-    const authFile = authFiles.find(f => 
-      f.authData.email === email || 
-      path.basename(f.filePath, '.json') === email
-    );
-    
-    if (!authFile) {
-      return res.status(404).json({ success: false, error: 'Account not found' });
-    }
-    
-    // 强制刷新token
-    const updatedAuth = await auth.refreshToken(authFile.authData);
-    auth.saveAuthFile(authFile.filePath, updatedAuth);
-    
-    res.json({
-      success: true,
-      email: updatedAuth.email,
-      expired: updatedAuth.expired
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+app.post('/api/refresh/:email', asyncHandler(async (req, res) => {
+  const email = decodeURIComponent(req.params.email);
+  const authFiles = await auth.scanAuthFilesAsync(CONFIG_DIR);
+  
+  const authFile = auth.findAuthFileByEmail(authFiles, email);
+  
+  if (!authFile) {
+    return res.status(404).json({ success: false, error: 'Account not found' });
   }
-});
+  
+  const updatedAuth = await auth.refreshToken(authFile.authData);
+  await auth.saveAuthFileAsync(authFile.filePath, updatedAuth);
+  auth.invalidateCache();
+  
+  res.json({
+    success: true,
+    email: updatedAuth.email,
+    expired: updatedAuth.expired
+  });
+}));
 
 /**
  * 获取代理配置
  */
 app.get('/api/proxy', (req, res) => {
-  try {
-    const config = auth.getProxyConfig();
-    res.json({ 
-      success: true, 
-      proxy: config || { enabled: false, type: 'http', url: '' }
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
+  const config = auth.getProxyConfig();
+  res.json({ 
+    success: true, 
+    proxy: config || { enabled: false, type: 'http', url: '' }
+  });
 });
 
 /**
  * 保存代理配置
  */
-app.post('/api/proxy', (req, res) => {
-  try {
-    const { enabled, type, url } = req.body;
-    
-    // 验证代理类型
-    if (type && !['http', 'socks5', 'socks4'].includes(type)) {
-      return res.status(400).json({ success: false, error: 'Invalid proxy type' });
-    }
-    
-    // 验证代理URL格式
-    if (enabled && url) {
-      try {
-        new URL(url);
-      } catch (e) {
-        return res.status(400).json({ success: false, error: 'Invalid proxy URL format' });
-      }
-    }
-    
-    const config = {
-      enabled: !!enabled,
-      type: type || 'http',
-      url: url || ''
-    };
-    
-    const result = auth.saveProxyConfig(config);
-    if (result) {
-      res.json({ success: true, proxy: config });
-    } else {
-      res.status(500).json({ success: false, error: 'Failed to save proxy config' });
-    }
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+app.post('/api/proxy', asyncHandler(async (req, res) => {
+  const { enabled, type, url } = req.body;
+  
+  if (type && !['http', 'socks5', 'socks4'].includes(type)) {
+    return res.status(400).json({ success: false, error: 'Invalid proxy type' });
   }
-});
+  
+  if (enabled && url) {
+    try {
+      new URL(url);
+    } catch (e) {
+      return res.status(400).json({ success: false, error: 'Invalid proxy URL format' });
+    }
+  }
+  
+  const config = {
+    enabled: !!enabled,
+    type: type || 'http',
+    url: url || ''
+  };
+  
+  const result = await auth.saveProxyConfigAsync(config);
+  if (result) {
+    res.json({ success: true, proxy: config });
+  } else {
+    res.status(500).json({ success: false, error: 'Failed to save proxy config' });
+  }
+}));
 
 /**
- * 测试代理连接
+ * 测试代理连接 (不修改配置文件)
  */
-app.post('/api/proxy/test', async (req, res) => {
-  try {
-    const { type, url } = req.body;
-    
-    if (!url) {
-      return res.status(400).json({ success: false, error: 'Proxy URL is required' });
-    }
-    
-    // 临时保存代理配置用于测试
-    const originalConfig = auth.getProxyConfig();
-    auth.saveProxyConfig({ enabled: true, type: type || 'http', url });
-    
-    try {
-      // 测试连接 Google
-      const testUrl = 'https://www.google.com';
-      const startTime = Date.now();
-      
-      const response = await auth.httpsRequestWithProxy(testUrl, {
-        method: 'GET',
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      });
-      
-      const latency = Date.now() - startTime;
-      
-      // 恢复原配置
-      if (originalConfig) {
-        auth.saveProxyConfig(originalConfig);
-      }
-      
-      if (response.statusCode >= 200 && response.statusCode < 400) {
-        res.json({ success: true, latency, message: `Connected in ${latency}ms` });
-      } else {
-        res.json({ success: false, error: `HTTP ${response.statusCode}` });
-      }
-    } catch (testError) {
-      // 恢复原配置
-      if (originalConfig) {
-        auth.saveProxyConfig(originalConfig);
-      }
-      res.json({ success: false, error: testError.message });
-    }
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+app.post('/api/proxy/test', asyncHandler(async (req, res) => {
+  const { type, url } = req.body;
+  
+  if (!url) {
+    return res.status(400).json({ success: false, error: 'Proxy URL is required' });
   }
-});
+  
+  const originalConfig = auth.getProxyConfig();
+  
+  auth.saveProxyConfig({ enabled: true, type: type || 'http', url });
+  
+  try {
+    const testUrl = 'https://www.google.com';
+    const startTime = Date.now();
+    
+    const response = await auth.httpsRequestWithProxy(testUrl, {
+      method: 'GET',
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    
+    const latency = Date.now() - startTime;
+    
+    // 恢复原配置
+    if (originalConfig) {
+      auth.saveProxyConfig(originalConfig);
+    } else {
+      auth.saveProxyConfig({ enabled: false, type: 'http', url: '' });
+    }
+    
+    if (response.statusCode >= 200 && response.statusCode < 400) {
+      res.json({ success: true, latency, message: `Connected in ${latency}ms` });
+    } else {
+      res.json({ success: false, error: `HTTP ${response.statusCode}` });
+    }
+  } catch (testError) {
+    // 恢复原配置
+    if (originalConfig) {
+      auth.saveProxyConfig(originalConfig);
+    } else {
+      auth.saveProxyConfig({ enabled: false, type: 'http', url: '' });
+    }
+    res.json({ success: false, error: testError.message });
+  }
+}));
 
 /**
  * 上传新的auth文件
  */
-app.post('/api/upload', express.text({ type: '*/*' }), (req, res) => {
-  try {
-    const authData = JSON.parse(req.body);
-    
-    if (!authData.refresh_token) {
-      return res.status(400).json({ success: false, error: 'Invalid auth file: missing refresh_token' });
-    }
-    
-    // 生成文件名
-    const email = authData.email || 'unknown';
-    const sanitizedEmail = email.replace(/[^a-zA-Z0-9@._-]/g, '_');
-    const fileName = `antigravity-${sanitizedEmail}.json`;
-    const filePath = path.join(CONFIG_DIR, fileName);
-    
-    // 确保配置目录存在
-    if (!fs.existsSync(CONFIG_DIR)) {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    }
-    
-    // 保存文件
-    auth.saveAuthFile(filePath, authData);
-    
-    res.json({
-      success: true,
-      message: 'Auth file uploaded successfully',
-      fileName: fileName
-    });
-  } catch (error) {
-    res.status(400).json({ success: false, error: error.message });
+app.post('/api/upload', express.text({ type: '*/*' }), asyncHandler(async (req, res) => {
+  const authData = JSON.parse(req.body);
+  
+  if (!authData.refresh_token) {
+    return res.status(400).json({ success: false, error: 'Invalid auth file: missing refresh_token' });
   }
-});
+  
+  const email = authData.email || 'unknown';
+  const sanitizedEmail = email.replace(/[^a-zA-Z0-9@._-]/g, '_');
+  const fileName = `antigravity-${sanitizedEmail}.json`;
+  const filePath = path.join(CONFIG_DIR, fileName);
+  
+  await fsPromises.mkdir(CONFIG_DIR, { recursive: true });
+  await auth.saveAuthFileAsync(filePath, authData);
+  auth.invalidateCache();
+  
+  res.json({
+    success: true,
+    message: 'Auth file uploaded successfully',
+    fileName: fileName
+  });
+}));
 
 /**
  * 删除账号
  */
-app.delete('/api/accounts/:email', (req, res) => {
-  try {
-    const email = decodeURIComponent(req.params.email);
-    const authFiles = auth.scanAuthFiles(CONFIG_DIR);
-    
-    const authFile = authFiles.find(f =>
-      f.authData.email === email ||
-      path.basename(f.filePath, '.json') === email
-    );
-    
-    if (!authFile) {
-      return res.status(404).json({ success: false, error: 'Account not found' });
-    }
-    
-    // 删除文件
-    fs.unlinkSync(authFile.filePath);
-    
-    // 清除缓存
-    quotaCache.delete(email);
-    
-    res.json({ success: true, message: 'Account deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+app.delete('/api/accounts/:email', asyncHandler(async (req, res) => {
+  const email = decodeURIComponent(req.params.email);
+  const authFiles = await auth.scanAuthFilesAsync(CONFIG_DIR);
+  
+  const authFile = auth.findAuthFileByEmail(authFiles, email);
+  
+  if (!authFile) {
+    return res.status(404).json({ success: false, error: 'Account not found' });
   }
-});
+  
+  await auth.deleteAuthFileAsync(authFile.filePath);
+  auth.invalidateCache();
+  quotaCache.delete(email);
+  
+  res.json({ success: true, message: 'Account deleted successfully' });
+}));
 
 /**
  * 下载账号凭证
  */
-app.get('/api/accounts/:email/download', (req, res) => {
-  try {
-    const email = decodeURIComponent(req.params.email);
-    const authFiles = auth.scanAuthFiles(CONFIG_DIR);
-    
-    const authFile = authFiles.find(f =>
-      f.authData.email === email ||
-      path.basename(f.filePath, '.json') === email
-    );
-    
-    if (!authFile) {
-      return res.status(404).json({ success: false, error: 'Account not found' });
-    }
-    
-    const fileName = path.basename(authFile.filePath);
-    res.download(authFile.filePath, fileName);
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+app.get('/api/accounts/:email/download', asyncHandler(async (req, res) => {
+  const email = decodeURIComponent(req.params.email);
+  const authFiles = await auth.scanAuthFilesAsync(CONFIG_DIR);
+  
+  const authFile = auth.findAuthFileByEmail(authFiles, email);
+  
+  if (!authFile) {
+    return res.status(404).json({ success: false, error: 'Account not found' });
   }
-});
+  
+  const fileName = path.basename(authFile.filePath);
+  res.download(authFile.filePath, fileName);
+}));
 
 /**
  * 启动OAuth登录流程
  */
 app.get('/api/auth/login', (req, res) => {
-  try {
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/callback`;
-    const { url, state } = auth.generateAuthUrl(redirectUri);
-    
-    // 存储state用于验证
-    oauthStates.add(state);
-    
-    // 5分钟后清除state
-    setTimeout(() => oauthStates.delete(state), 5 * 60 * 1000);
-    
-    res.json({ success: true, url });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
+  const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/callback`;
+  const { url, state } = auth.generateAuthUrl(redirectUri);
+  
+  oauthStates.add(state);
+  setTimeout(() => oauthStates.delete(state), 5 * 60 * 1000);
+  
+  res.json({ success: true, url });
 });
 
 /**
  * OAuth回调处理
  */
-app.get('/api/auth/callback', async (req, res) => {
+app.get('/api/auth/callback', asyncHandler(async (req, res) => {
   const { code, state, error } = req.query;
   
   if (error) {
@@ -387,61 +363,53 @@ app.get('/api/auth/callback', async (req, res) => {
   
   oauthStates.delete(state);
   
-  try {
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/callback`;
-    const tokenResp = await auth.exchangeCodeForToken(code, redirectUri);
-    const userInfo = await auth.getUserInfo(tokenResp.access_token);
-    
-    const email = userInfo.email;
-    const now = Date.now();
-    
-    const authData = {
-      access_token: tokenResp.access_token,
-      refresh_token: tokenResp.refresh_token,
-      expires_in: tokenResp.expires_in,
-      timestamp: now,
-      expired: new Date(now + tokenResp.expires_in * 1000).toISOString(),
-      type: 'antigravity',
-      email: email
-    };
-    
-    const sanitizedEmail = email.replace(/[^a-zA-Z0-9@._-]/g, '_');
-    const fileName = `antigravity-${sanitizedEmail}.json`;
-    const filePath = path.join(CONFIG_DIR, fileName);
-    
-    if (!fs.existsSync(CONFIG_DIR)) {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    }
-    
-    auth.saveAuthFile(filePath, authData);
-    
-    // 返回HTML，自动关闭窗口并通知父窗口
-    res.send(`
-      <html>
-        <head>
-          <title>Authentication Successful</title>
-        </head>
-        <body>
-          <h1>Authentication Successful!</h1>
-          <p>You can close this window now.</p>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'AUTH_SUCCESS', email: '${email}' }, '*');
-              window.close();
-            } else {
-              setTimeout(() => {
-                window.location.href = '/';
-              }, 2000);
-            }
-          </script>
-        </body>
-      </html>
-    `);
-  } catch (error) {
-    console.error('Auth callback error:', error);
-    res.status(500).send(`Authentication failed: ${error.message}`);
-  }
-});
+  const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/callback`;
+  const tokenResp = await auth.exchangeCodeForToken(code, redirectUri);
+  const userInfo = await auth.getUserInfo(tokenResp.access_token);
+  
+  const email = userInfo.email;
+  const now = Date.now();
+  
+  const authData = {
+    access_token: tokenResp.access_token,
+    refresh_token: tokenResp.refresh_token,
+    expires_in: tokenResp.expires_in,
+    timestamp: now,
+    expired: new Date(now + tokenResp.expires_in * 1000).toISOString(),
+    type: 'antigravity',
+    email: email
+  };
+  
+  const sanitizedEmail = email.replace(/[^a-zA-Z0-9@._-]/g, '_');
+  const fileName = `antigravity-${sanitizedEmail}.json`;
+  const filePath = path.join(CONFIG_DIR, fileName);
+  
+  await fsPromises.mkdir(CONFIG_DIR, { recursive: true });
+  await auth.saveAuthFileAsync(filePath, authData);
+  auth.invalidateCache();
+  
+  res.send(`
+    <html>
+      <head>
+        <title>Authentication Successful</title>
+      </head>
+      <body>
+        <h1>Authentication Successful!</h1>
+        <p>You can close this window now.</p>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'AUTH_SUCCESS', email: '${email}' }, '*');
+            window.close();
+          } else {
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 2000);
+          }
+        </script>
+      </body>
+    </html>
+  `);
+}));
 
 /**
  * 健康检查
@@ -461,8 +429,11 @@ app.get('/api/cache', (req, res) => {
   res.json({ success: true, cache });
 });
 
+// 应用全局错误处理
+app.use(errorHandler);
+
 // 启动服务器
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║         Antigravity Quota Web Panel                       ║
@@ -472,8 +443,8 @@ app.listen(PORT, () => {
 ╚═══════════════════════════════════════════════════════════╝
   `);
   
-  // 扫描现有auth文件
-  const authFiles = auth.scanAuthFiles(CONFIG_DIR);
+  // 扫描现有auth文件 (异步)
+  const authFiles = await auth.scanAuthFilesAsync(CONFIG_DIR);
   if (authFiles.length > 0) {
     console.log(`Found ${authFiles.length} auth file(s):`);
     authFiles.forEach(({ authData }) => {
